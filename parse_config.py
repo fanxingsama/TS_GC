@@ -14,7 +14,6 @@ from utils import read_json, write_json
 class ConfigParser:
     def __init__(self, config, resume=None, modification=None, run_id=None):
         """
-        1
         config：包含配置和训练超参数的字典。例如，config.json 文件的内容。
         resume：字符串，正在加载的检查点的路径。
         modification：字典，键值对为 keychain:value，指定要从配置字典中替换的位置值。

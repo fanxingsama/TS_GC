@@ -6,11 +6,14 @@ import torch.nn.functional as F
 LRP模型：将模型的输出（如预测结果）分解为输入特征的贡献，从而帮助理解模型的决策过程。
 
 '''
+
+# 安全地执行除法操作，避免除以零。
 def safe_divide(a, b):
     den = b.clamp(min=1e-9) + b.clamp(max=1e-9)
     den = den + den.eq(0).type(den.type()) * 1e-9
     return a / den * b.ne(0).type(b.type())
 
+# 在模块的前向传播中记录输入和输出。
 def forward_hook(self, input, output):
     if type(input[0]) in (list, tuple):
         self.X = []
@@ -24,6 +27,8 @@ def forward_hook(self, input, output):
 
     self.Y = output
 
+
+# 定义了一个基类，用于实现 LRP 的基本功能。
 class RelProp(nn.Module):
     def __init__(self):
         super(RelProp, self).__init__()
@@ -48,6 +53,7 @@ class LayerNorm(nn.LayerNorm, RelProp):
 class Dropout(nn.Dropout, RelProp):
     pass
 
+# 克隆模块，用于在 LRP 中处理多个输入，将输入复制多次
 class Clone(RelProp):
     def forward(self, input, num):
         self.__setattr__('num', num)
@@ -68,6 +74,7 @@ class Clone(RelProp):
 
         return R
     
+# 执行爱因斯坦求和
 class einsum(RelProp):
     def __init__(self, equation):
         super().__init__()

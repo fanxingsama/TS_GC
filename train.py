@@ -10,8 +10,6 @@ from parse_config import ConfigParser
 from trainer import Trainer
 from utils import prepare_device
 
-
-# fix random seeds for reproducibility
 SEED = 123
 torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
@@ -19,34 +17,33 @@ torch.backends.cudnn.benchmark = False
 np.random.seed(SEED)
 
 def main(config):
-    logger = config.get_logger('train')
+    logger = config.get_logger('train') # 日志记录器
 
-    # setup data_loader instances
-    data_loader = config.init_obj('data_loader', module_data)
-    valid_data_loader = data_loader.split_validation()
-    config['data_loader']['args']['series_num'] = data_loader.series_num
-    config['data_loader']['args']['time_step'] = data_loader.time_step
+    data_loader = config.init_obj('data_loader', module_data) # 初始化数据加载器
+    valid_data_loader = data_loader.split_validation() # 分离出验证集
+    config['data_loader']['args']['series_num'] = data_loader.series_num # 设置数据加载器参数
+    config['data_loader']['args']['time_step'] = data_loader.time_step 
     config['data_loader']['args']['output_window'] = data_loader.output_window
-    # build model architecture, then print to console
-    model = config.init_obj('arch', module_arch, config)
-    logger.info(model)
+    
+    model = config.init_obj('arch', module_arch, config) # 构建模型架构
+    logger.info(model) # 打印模型架构
 
-    # prepare for (multi-device) GPU training
-    device, device_ids = prepare_device(config['n_gpu'])
-    model = model.to(device)
-    if len(device_ids) > 1:
+    
+    device, device_ids = prepare_device(config['n_gpu']) # 准备训练模型的设备
+    model = model.to(device) # 将模型加载到设备上
+    if len(device_ids) > 1: # 如果有多个GPU，则使用DataParallel
         model = torch.nn.DataParallel(model, device_ids=device_ids)
 
-    # get function handles of loss and metrics
-    criterion = getattr(module_loss, config['loss'])
-    metrics = [getattr(module_metric, met) for met in config['metrics']]
+    # 
+    criterion = getattr(module_loss, config['loss']) # 获取所需要使用的损失函数
+    metrics = [getattr(module_metric, met) for met in config['metrics']] # 获取所需要使用的评估指标
 
-    # build optimizer, learning rate scheduler. delete every lines containing lr_scheduler for disabling scheduler
-    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
-    optimizer = config.init_obj('optimizer', torch.optim, trainable_params)
-    lr_scheduler = config.init_obj('lr_scheduler', torch.optim.lr_scheduler, optimizer)
-    lam = config['trainer']['lam']
+    trainable_params = filter(lambda p: p.requires_grad, model.parameters()) # 获取需要训练的参数
+    optimizer = config.init_obj('optimizer', torch.optim, trainable_params) # 构建优化器
+    lr_scheduler = config.init_obj('lr_scheduler', torch.optim.lr_scheduler, optimizer) # 构建学习率调整器
+    lam = config['trainer']['lam'] # 获取训练相关参数
 
+    # 开始训练模型
     trainer = Trainer(model, criterion, metrics, optimizer,
                       config=config,
                       device=device,
@@ -59,6 +56,7 @@ def main(config):
 
 
 if __name__ == '__main__':
+    # 解析命令行参数
     args = argparse.ArgumentParser(description='Causality')
     args.add_argument('-c', '--config', default=None, type=str,
                       help='config file path (default: None)')
@@ -67,11 +65,10 @@ if __name__ == '__main__':
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
 
-    # custom cli options to modify configuration from default values given in json file.
     CustomArgs = collections.namedtuple('CustomArgs', 'flags type target')
     options = [
         CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
         CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;batch_size')
     ]
-    config = ConfigParser.from_args(args, options)
+    config = ConfigParser.from_args(args, options) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
     main(config)

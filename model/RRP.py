@@ -4,13 +4,9 @@ import torch.nn.functional as F
 from model.NonParamRP import *
 
 class RegRelProp(RelProp):
-    """
-    This class implements the Regularized Relevance Propagation (RRP) algorithm.
-    """
+    # 对线性层进行回归相关传播。
     def relprop(self, R):
         """
-        This method performs the regression relevance propagation for the linear layer.
-
         Args:
             R (torch.Tensor): Relevance scores from the previous layer.
 

@@ -5,31 +5,31 @@ from pathlib import Path
 from itertools import repeat
 from collections import OrderedDict
 
-
+# 确保指定目录存在
 def ensure_dir(dirname):
     dirname = Path(dirname)
     if not dirname.is_dir():
         dirname.mkdir(parents=True, exist_ok=False)
 
+# 读取json文件，返回内容
 def read_json(fname):
     fname = Path(fname)
     with fname.open('rt') as handle:
         return json.load(handle, object_hook=OrderedDict)
 
+# 把内容写入json文件
 def write_json(content, fname):
     fname = Path(fname)
     with fname.open('wt') as handle:
         json.dump(content, handle, indent=4, sort_keys=False)
 
+# 创建一个无限循环的数据加载器。
 def inf_loop(data_loader):
-    ''' wrapper function for endless data loader. '''
     for loader in repeat(data_loader):
         yield from loader
 
+# 根据用户指定的 GPU 数量，配置设备（GPU 或 CPU）
 def prepare_device(n_gpu_use):
-    """
-    setup GPU device if available. get gpu device indices which are used for DataParallel
-    """
     n_gpu = torch.cuda.device_count()
     if n_gpu_use > 0 and n_gpu == 0:
         print("Warning: There\'s no GPU available on this machine,"
@@ -43,16 +43,19 @@ def prepare_device(n_gpu_use):
     list_ids = list(range(n_gpu_use))
     return device, list_ids
 
+# 跟踪和计算各种指标的平均值
 class MetricTracker:
     def __init__(self, *keys, writer=None):
         self.writer = writer
         self._data = pd.DataFrame(index=keys, columns=['total', 'counts', 'average'])
         self.reset()
 
+    # 重置所有指标的总和、计数和平均值为 0。
     def reset(self):
         for col in self._data.columns:
             self._data[col].values[:] = 0
 
+    # 更新指定指标的值和计数
     def update(self, key, value, n=1):
         if self.writer is not None:
             self.writer.add_scalar(key, value)
@@ -60,8 +63,10 @@ class MetricTracker:
         self._data.counts[key] += n
         self._data.average[key] = self._data.total[key] / self._data.counts[key]
 
+    # 获取指定指标的平均值。
     def avg(self, key):
         return self._data.average[key]
 
+    # 获取所有指标的平均值。
     def result(self):
         return dict(self._data.average)
