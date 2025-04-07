@@ -18,7 +18,7 @@ class Trainer(BaseTrainer):
     valid_data_loader：验证数据加载器（可选）。
     lr_scheduler：学习率调度器（可选）。
     lam：正则化项的权重（默认为 0）。
-    len_epoch：每个 epoch 的迭代次数（可选，用于迭代式训练）。
+    len_epoch：每个 epoch 的迭代次数（可选，用于迭代式训练）
     '''
     def __init__(self, model, criterion, metric_ftns, optimizer, config, device,
                  data_loader, valid_data_loader=None, lr_scheduler=None, lam=0, len_epoch=None):
@@ -38,12 +38,13 @@ class Trainer(BaseTrainer):
         self.lam = lam
         self.log_step = int(np.sqrt(data_loader.batch_size))
 
+        # 跟踪和计算各种指标的平均值
         self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
         self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
 
     # 模型训练
     def _train_epoch(self, epoch):
-        self.model.train()
+        self.model.train() # 调用基类的方法，监控训练过程并保存检查点
         self.train_metrics.reset()
         # enumerate:在遍历可迭代对象的时候，同时还获取这个元素的索引到idx里
         for batch_idx, (data, target) in enumerate(self.data_loader): # 遍历数据加载器

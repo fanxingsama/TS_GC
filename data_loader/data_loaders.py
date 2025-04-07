@@ -33,7 +33,7 @@ class TimeseriesDataLoader(BaseDataLoader):
         self.output_dim = output_dim
         
         # 归一化数据
-        scaler = preprocessing.MinMaxScaler(feature_range=[0.5,1]) # 将数据缩放到 [0.5, 1] 范围内。
+        scaler = preprocessing.MinMaxScaler(feature_range=(0.5,1 )) # 将数据缩放到 [0.5, 1] 范围内。
         self.data = scaler.fit_transform(self.data)
         
         # 构造输入样本

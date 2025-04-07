@@ -48,16 +48,22 @@ class ConfigParser:
     # 从命令行参数中解析配置文件，并返回一个ConfigParser对象。
     @classmethod #  允许在不直接调用类构造函数的情况下创建类的实例，即不需要实例化ConfigParser，直接用ConfigParser.from_args()来解析配置文件
     def from_args(cls, args, options='', run_id=None):
+        # cls在这里表示ConfigParser类本身
+        # run_id：唯一标识符，用于保存检查点和日志
         for opt in options:
             args.add_argument(*opt.flags, default=None, type=opt.type)
 
+        
+        # 如果args是字典，则将其转换为argparse.Namespace对象
         if isinstance(args, dict):
             args = argparse.Namespace(**args)
-        elif not isinstance(args, tuple):
+        elif not isinstance(args, tuple): # 如果args不是字典也不是元组，则使用argparse解析命令行参数
             args = args.parse_args()
 
         if args.device is not None:
             os.environ["CUDA_VISIBLE_DEVICES"] = args.device
+        
+        # 如果指定了检查点参数，则从指定的检查点中加载配置文件。
         if args.resume is not None:
             resume = Path(args.resume)
             cfg_fname = resume.parent / 'config.json'
@@ -67,16 +73,18 @@ class ConfigParser:
             resume = None
             cfg_fname = Path(args.config)
         
+        # 从配置文件中读取配置信息，并更新为默认值
         config = read_json(cfg_fname)
         if hasattr(args, 'name') and args.name is not None:
             config['name'] = args.name
         if hasattr(args, 'data_dir') and args.data_dir is not None:
             config['data_loader']['args']['data_dir'] = args.data_dir
+        
+        # 如果指定了配置文件和检查点，则更新配置信息,用于微调
         if args.config and resume:
-            # update new config for fine-tuning
             config.update(read_json(args.config))
 
-        # parse custom cli options into dictionary
+        # 
         modification = {opt.target : getattr(args, _get_opt_name(opt.flags)) for opt in options}
         return cls(config, resume, modification, run_id)
 

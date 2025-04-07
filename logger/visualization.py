@@ -2,6 +2,10 @@ import importlib
 from datetime import datetime
 
 
+'''
+用于封装 TensorBoard 的日志记录功能。
+它允许用户在训练过程中动态记录各种数据（如标量、图像、音频等），并根据配置动态选择 TensorBoard 的实现模块。
+'''
 class TensorboardWriter():
     def __init__(self, log_dir, logger, enabled):
         self.writer = None
