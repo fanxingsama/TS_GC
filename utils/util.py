@@ -59,9 +59,9 @@ class MetricTracker:
     def update(self, key, value, n=1):
         if self.writer is not None:
             self.writer.add_scalar(key, value)
-        self._data.total[key] += value * n
-        self._data.counts[key] += n
-        self._data.average[key] = self._data.total[key] / self._data.counts[key]
+        self._data.loc[key, 'total'] += value * n
+        self._data.loc[key, 'counts'] += n
+        self._data.loc[key, 'average'] = self._data.loc[key, 'total'] / self._data.loc[key, 'counts']
 
     # 获取指定指标的平均值。
     def avg(self, key):

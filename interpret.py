@@ -41,7 +41,7 @@ def load_model(path, args, name='Causality Detecting', run_id=None):
     model = model.to(device) # 把模型放到设备上
     if len(device_ids) > 1: # 多GPU情况
         model = torch.nn.DataParallel(model, device_ids=device_ids)
-    checkpoint = torch.load(checkpoint_path) # 加载预训练好的模型
+    checkpoint = torch.load(checkpoint_path, weights_only=False) # 加载预训练好的模型
     model.load_state_dict(checkpoint['state_dict']) # 让模型加载参数
     return model, config, data_loader
     

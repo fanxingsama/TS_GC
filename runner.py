@@ -29,59 +29,9 @@ def construct_fMRI():
         }
     return task_list
 
-def construct_basic_diamond():
-    task_list = {}
-    for i in range(10):
-        task_list[f'diamond{i}'] = {
-            'dataset': f"data/basic/diamond/data_{i}.csv",
-            'groundtruth': f"data/basic/diamond/groundtruth.csv"
-        }
-    return task_list
-
-def construct_basic_mediator():
-    task_list = {}
-    for i in range(10):
-        task_list[f'mediator{i}'] = {
-            'dataset': f"data/basic/mediator/data_{i}.csv",
-            'groundtruth': f"data/basic/mediator/groundtruth.csv"
-        }
-    return task_list
-
-def construct_basic_v():
-    task_list = {}
-    for i in range(10):
-        task_list[f'v{i}'] = {
-            'dataset': f"data/basic/v/data_{i}.csv",
-            'groundtruth': f"data/basic/v/groundtruth.csv"
-        }
-    return task_list
-
-def construct_basic_fork():
-    task_list = {}
-    for i in range(10):
-        task_list[f'fork{i}'] = {
-            'dataset': f"data/basic/fork/data_{i}.csv",
-            'groundtruth': f"data/basic/fork/groundtruth.csv"
-        }
-    return task_list
-
-def construct_lorenz():
-    task_list = {}
-    for i in range(10):
-        task_list[f'lorenz{i}'] = {
-            'dataset': f"data/lorenz96/timeseries{i}.csv",
-            'groundtruth': f"data/lorenz96/groundtruth.csv"
-        }
-    return task_list
-
 tasks={
     'demo': construct_demo,
     'fMRI': construct_fMRI,
-    'diamond': construct_basic_diamond,
-    'mediator': construct_basic_mediator,
-    'v': construct_basic_v,
-    'fork': construct_basic_fork,
-    'lorenz':construct_lorenz
 }    
 
 def runtask(label, args, dataset, ground_truth, task_name):
@@ -90,13 +40,15 @@ def runtask(label, args, dataset, ground_truth, task_name):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     np.random.seed(SEED)
+
     # 构建一个字典，里面包含项目运行所需的基本参数
     args_dict = {'name':f'Batch Runner/{label}/{task_name}',
                  'config': args.config,
                  'resume': None,
                  'device': args.device,
                  'data_dir': dataset}
-    config = ConfigParser.from_args(args=args_dict, run_id='model')
+    config = ConfigParser.from_args(args=args_dict, run_id='model') # 解析命令行参数
+    
     train.main(config) # 训练模型
     torch.cuda.empty_cache() # 清理显存
     # 加载模型并进行解释

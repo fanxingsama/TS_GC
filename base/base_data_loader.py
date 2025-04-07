@@ -41,6 +41,7 @@ class BaseDataLoader(DataLoader):
         np.random.shuffle(idx_full)
 
         # 根据split的类型，划分数据集
+        # 如果 split 是整数，表示验证集的样本数量；如果 split 是浮点数，表示验证集的比例。
         if isinstance(split, int):
             assert split > 0
             assert split < self.n_samples, "validation set size is configured to be larger than entire dataset."
@@ -52,7 +53,7 @@ class BaseDataLoader(DataLoader):
         valid_idx = idx_full[0:len_valid]
         train_idx = np.delete(idx_full, np.arange(0, len_valid))
 
-        # 使用 SubsetRandomSampler 创建训练集和验证集的采样器
+        # 使用 SubsetRandomSampler（子随机采样器） 创建训练集和验证集的采样器
         train_sampler = SubsetRandomSampler(train_idx)
         valid_sampler = SubsetRandomSampler(valid_idx)
 

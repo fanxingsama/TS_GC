@@ -136,7 +136,7 @@ class BaseTrainer:
         self.logger.info("Loading checkpoint: {} ...".format(resume_path))
 
         # 加载检查点文件，并更新起始轮次和最佳监控指标值
-        checkpoint = torch.load(resume_path)
+        checkpoint = torch.load(resume_path, weights_only=False)
         self.start_epoch = checkpoint['epoch'] + 1
         self.mnt_best = checkpoint['monitor_best']
 
