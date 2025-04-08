@@ -1,11 +1,10 @@
 import argparse
-import collections
 import torch
 import numpy as np
 import data_loader.data_loaders as module_data
 import utils.loss_metric as module_metric
 import model.model as module_arch
-from utils.parse_config import ConfigParser
+from utils.args_config_analyse import args_config_analyse
 from trainer import Trainer
 from utils import prepare_device
 
@@ -47,15 +46,17 @@ def main(config):
                       lam = lam)
 
     trainer.train()
+    print('===============模型训练结束==============')
 
 
+# 单独运行这个文件
 if __name__ == '__main__':
-    # 解析命令行参数
+    
     args = argparse.ArgumentParser(description='Causality')
     args.add_argument('-c', '--config', default=None, type=str,
                       help='config file path (default: None)')
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
 
-    config = ConfigParser.from_args(args=args) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
+    config = args_config_analyse.from_args(args=args) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
     main(config)

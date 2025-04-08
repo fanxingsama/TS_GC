@@ -11,7 +11,7 @@ from utils import read_json, write_json
 
 
 # 用于解析args和配置项 JSON 文件的类。
-class ConfigParser:
+class args_config_analyse:
     def __init__(self, config, resume=None, run_id=None):
         """
         config：包含配置和训练超参数的字典。例如，config.json 文件的内容。
@@ -46,10 +46,9 @@ class ConfigParser:
             2: logging.DEBUG
         }
 
-    # 从命令行参数中解析配置文件，并返回一个ConfigParser对象。
+    # 从命令行参数中解析配置文件，并返回一个args_config_analyse对象。
     @classmethod
-    def from_args(cls, args, options='', run_id=None):
-        # cls在这里表示ConfigParser类本身
+    def from_args(aca, args, options='', run_id=None):
         # run_id：唯一标识符，用于保存检查点和日志
         for opt in options:
             args.add_argument(*opt.flags, default=None, type=opt.type)
@@ -69,8 +68,8 @@ class ConfigParser:
         if hasattr(args, 'data_dir') and args.data_dir is not None: # 多个文件的情况下，可能需要读多个csv，所以需要修改数据路径
             config['data_loader']['args']['data_dir'] = args.data_dir
 
-        # 返回一个ConfigParser对象，重新调用了__init__方法
-        return cls(config, None, run_id)
+        # 返回一个args_config_analyse对象，重新调用了__init__方法
+        return aca(config, None, run_id)
 
     # 根据给定的名称，初始化一个对象。
     def init_obj(self, name, module, *args, **kwargs):
@@ -110,7 +109,7 @@ class ConfigParser:
         logger.setLevel(self.log_levels[verbosity])
         return logger
 
-    # 采用property装饰器，让_config、_save_dir、_log_dir等属性都能够被直接取用，可以直接采用属性的方式获取
+     # 采用property装饰器，让_config、_save_dir、_log_dir等属性都能够被直接取用，可以直接采用属性的方式获取
     # 比如con = ConfigParser(xx),之后con.config就是获取的_config
     @property
     def config(self):

@@ -4,7 +4,7 @@ import data_loader.data_loaders as module_data
 import model.model as module_arch
 import argparse
 from copy import deepcopy
-from utils.parse_config import ConfigParser
+from utils.args_config_analyse import args_config_analyse
 from evaluator.evaluator import evaluate, getextendeddelays, evaluatedelay
 from utils import prepare_device
 from sklearn.cluster import KMeans
@@ -79,7 +79,7 @@ def load_model(path, args, name='Causality Detecting', run_id=None):
     args_dict = {'name': name,
                  'config': config_path,
                  'device': args.device}
-    config = ConfigParser.from_args(args=args_dict, run_id=run_id) # 解析配置文件
+    config = args_config_analyse.from_args(args=args_dict, run_id=run_id) # 解析配置文件
 
     data_loader = config.init_obj('data_loader', module_data) # 根据配置项，初始化一个数据加载器对象
     config['data_loader']['args']['series_num']=data_loader.series_num
@@ -192,11 +192,10 @@ def main(model, config, data_loader, gt):
 
 # 如果这个脚本单独运行
 if __name__ == '__main__':
-    args = argparse.ArgumentParser(description='CausalityInterpret') # 创建脚本解析器
+    args = argparse.ArgumentParser(description='CausalityInterpret') 
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
-    
-    args = args.parse_args() # 解析整个参数
+    args = args.parse_args() 
     # 加载模型
     def render(args):
         return load_model('saved/models/Causality Discovery/0714_134931', args), 'data/fMRI/sim1_gt_processed.csv', False 

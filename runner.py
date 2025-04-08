@@ -1,5 +1,5 @@
 import argparse
-from utils.parse_config import ConfigParser
+from utils.args_config_analyse import args_config_analyse
 from datetime import datetime
 import train
 import interpret
@@ -41,12 +41,12 @@ def runtask(label, args, dataset, ground_truth, task_name):
     torch.backends.cudnn.benchmark = False
     np.random.seed(SEED)
 
-    # 构建一个字典，里面包含项目运行所需的基本参数
+    # 构建一个args字典，里面包含项目运行所需的基本参数
     args_dict = {'name':f'Batch Runner/{label}/{task_name}',
                  'config': args.config,
                  'device': args.device,
                  'data_dir': dataset}
-    config = ConfigParser.from_args(args=args_dict, run_id='model') # 解析命令行参数
+    config = args_config_analyse.from_args(args=args_dict, run_id='model') # 解析命令行参数
     
     train.main(config) # 训练模型
     torch.cuda.empty_cache() # 清理显存
@@ -88,12 +88,15 @@ def main(args):
     print("===================Summary===================")
     print('\t'+ df.to_string().replace('\n', '\n\t'))
 
+
+# 单独运行这个文件
 if __name__=="__main__":
     args = argparse.ArgumentParser(description='CausalityInterpret')
     args.add_argument('-c', '--config', default=None, type=str,
                       help='config file path (default: None)')
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
+    # 要加载的数据集
     args.add_argument('-t', '--task', default='fMRI', type=str,
                       help='task (default: fMRI)')
     args = args.parse_args()
