@@ -1,13 +1,11 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from base import BaseModel
-from model.RRP import *
+from model.NonParamRP import *
 import math
 from utils import prepare_device
 
 # 时序嵌入
-class Embedding(BaseModel):
+class Embedding(nn.Module):
     """
     参数：
         series_num (int): 输入中的时间序列数量。
@@ -58,7 +56,7 @@ class Embedding(BaseModel):
         # [batch_size, series_num, d_model]
 
 # 多核因果卷积块
-class CausalConv(BaseModel):
+class CausalConv(nn.Module):
     """
         series_num (int): 输入中的时间序列数量。
         input_window (int): 输入时间序列窗口的长度。
@@ -163,7 +161,7 @@ class CausalConv(BaseModel):
         return rel_x
 
 # 多变量因果注意力
-class MultiVariateCausalAttention(BaseModel):
+class MultiVariateCausalAttention(nn.Module):
     """
         series_num (int): 输入中的时间序列数量。
         input_window (int): 输入时间序列窗口的长度。
@@ -252,7 +250,7 @@ class MultiVariateCausalAttention(BaseModel):
         return rel_q, rel_k, rel_v
 
 # 多头注意力
-class MultiHeadAttention(BaseModel):
+class MultiHeadAttention(nn.Module):
     """
         series_num (int): 输入中的时间序列数量。
         input_window (int): 输入时间序列窗口的长度。
@@ -279,11 +277,15 @@ class MultiHeadAttention(BaseModel):
         self.device = device
         
         self.attention = MultiVariateCausalAttention(self.series_num, self.input_window, self.feature_dim, self.d_model, self.n_head, self.tau, self.device)
+
         self.Wq = Linear(in_features=self.d_model, out_features=self.d_model, bias=True)
         self.Wq.weight.data.normal_(0, math.sqrt(2.0/(self.d_model+self.d_model))) # He初始化
+
         self.Wk = Linear(in_features=self.d_model, out_features=self.d_model, bias=True)
         self.Wk.weight.data.normal_(0, math.sqrt(2.0/(self.d_model+self.d_model))) # He初始化
+
         self.Wv = CausalConv(self.series_num, self.input_window, self.n_head, self.device)
+
         self.w_concat = Linear(in_features=self.n_head * self.feature_dim, out_features=self.feature_dim, bias=False)
         self.w_concat.weight.data.normal_(0, math.sqrt(2.0/(self.d_model+self.d_model))) # He初始化
 
@@ -340,12 +342,9 @@ class MultiHeadAttention(BaseModel):
         rel_q, rel_k, rel_v = self.Wq.relprop(rel_q), self.Wk.relprop(rel_k), self.Wv.relprop(rel_v)
         return rel_q, rel_k, rel_v
 
-class PositionwiseFeedForward(BaseModel):
+# 位置前馈层
+class PositionwiseFeedForward(nn.Module):
     """
-    This class implements the Positionwise Feed Forward Layer described in the paper.
-    It is composed of two linear neural networks separated by a leaky ReLU activation function.
-
-    参数：
         dim (int): 输入维度。
         hidden (int): 前馈层中间的隐藏维度。在论文中表示为 d_FFN。
         drop_prob (float): Dropout 概率（实际中未使用）。
@@ -358,11 +357,11 @@ class PositionwiseFeedForward(BaseModel):
     def __init__(self, dim, hidden, drop_prob=0.1):
         super().__init__()
         self.linear1 = Linear(dim, hidden, bias=True)
-        # He Initialization
-        self.linear1.weight.data.normal_(0, math.sqrt(2.0/(dim+hidden)))
+        self.linear1.weight.data.normal_(0, math.sqrt(2.0/(dim+hidden))) # He Initialization
+
         self.linear2 = Linear(hidden, dim, bias=True)
-        # He Initialization
-        self.linear2.weight.data.normal_(0, math.sqrt(2.0/(hidden+dim)))
+        self.linear2.weight.data.normal_(0, math.sqrt(2.0/(hidden+dim))) # He Initialization
+
         self.activation = LeakyReLU()
         self.dropout = Dropout(drop_prob)
 
@@ -380,8 +379,18 @@ class PositionwiseFeedForward(BaseModel):
         rel = self.linear1.relprop(rel)
         return rel
 
-class EncoderLayer(BaseModel):
-
+class EncoderLayer(nn.Module):
+    """
+        series_num (int): 输入中的时间序列数量。
+        input_window (int): 输入时间序列窗口的长度。
+        feature_dim (int): 时间序列中每个特征的维度。
+        d_model (int): 嵌入向量的维度。在论文中表示为 D_QK。
+        n_head (int): 注意力头的数量。在论文中表示为 h。
+        ffn_hidden (int): 前馈层中的隐藏维度。在论文中表示为 d_FFN。
+        drop_prob (float): Dropout 概率（实际中未使用）。
+        tau (float): 用于注意力 softmax 的温度超参数。
+        device (str): 计算设备（'cpu' 或 'cuda'）。
+    """
     def __init__(self, series_num, input_window, feature_dim, d_model, n_head, ffn_hidden, drop_prob, tau, device):
         super().__init__()
         self.qk = Clone()
@@ -427,11 +436,8 @@ class EncoderLayer(BaseModel):
         rel_emb = self.qk.relprop((rel_q, rel_k))
         return rel_emb, rel
 
-class Encoder(BaseModel):
+class Encoder(nn.Module):
     """
-    This class implements an Encoder Layer of the Causality-Aware Transformer.
-
-    参数：
         series_num (int): 输入中的时间序列数量。
         input_window (int): 输入时间序列窗口的长度。
         feature_dim (int): 时间序列中每个特征的维度。
@@ -441,13 +447,6 @@ class Encoder(BaseModel):
         drop_prob (float): Dropout 概率（实际中未使用）。
         tau (float): 用于注意力 softmax 的温度超参数。
         device (str): 计算设备（'cpu' 或 'cuda'）。
-        qk (Clone): Clone 类的实例。
-        attention (MultiHeadAttention): MultiHeadAttention 类的实例。
-        norm1 (LayerNorm): 第一个注意力块后的层归一化。
-        dropout1 (Dropout): 第一个注意力块后的 Dropout 层（实际中未使用）。
-        ffn (PositionwiseFeedForward): PositionwiseFeedForward 类的实例。
-        norm2 (LayerNorm): 前馈块后的层归一化。
-        dropout2 (Dropout): 前馈块后的 Dropout 层（实际中未使用）。
     """
 
     def __init__(self, series_num, input_window, feature_dim, d_model, n_head, n_layers, ffn_hidden, drop_prob, tau, device):
@@ -489,12 +488,9 @@ class Encoder(BaseModel):
             emb_rel, rel = layer.relprop(rel)
         return rel
 
-class PredictModel(BaseModel):
+# 基于因果关系感知转换器的深度学习模型，对时间序列数据进行预测。
+class PredictModel(nn.Module):
     """
-    This class implements the PredictModel, a causality-aware transformer-based deep learning model
-    for making predictions on time series data.
-
-    参数：
         config (dict): 包含数据加载器和架构参数的配置字典。
         d_model (int): 嵌入向量的维度。在论文中表示为 D_QK。
         n_head (int): 注意力头的数量。在论文中表示为 h。

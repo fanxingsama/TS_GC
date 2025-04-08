@@ -1,8 +1,3 @@
-# This code snippet is sourced from the TCDF project by M-Nauta.
-# Original code: https://github.com/M-Nauta/TCDF
-# Licensed under the GNU General Public License v3.0 (GPL-3.0)
-# SPDX-License-Identifier: GPL-3.0
-
 import pandas as pd
 import numpy as np
 import networkx as nx
@@ -70,7 +65,7 @@ def getextendeddelays(gtfile, columns):
     '''
     return extendedgtdelays, readgt, extendedreadgt
 
-# 评估 TCDF 的结果，计算精确度、召回率和 F1 分数
+# 评估结果，计算精确度、召回率和 F1 分数
 def evaluate(logger, gtfile, validatedcauses, columns):
     extendedgtdelays, readgt, extendedreadgt = getextendeddelays(gtfile, columns)
     FP=0

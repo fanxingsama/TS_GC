@@ -1,17 +1,16 @@
 import torch
 
-# Regression Relevance Propogation
 class RRP:
     def __init__(self, model):
         self.model = model
         self.model.eval() # 模型设置为评估模式
 
-    # 为整个输入数据生成回归相关性分数
+    # 收集并计算模型中每个层的因果关系分数，包括注意力矩阵和卷积核的因果分数。
     def generate_RRP(self, batch_size, input, interpreted_series):
-        inputs = torch.split(input, batch_size) # split inputs into batches
-        relAs, relKs = [], []
-        for data in inputs:
-            relA, relK = self._generate_RRP(data, interpreted_series) # generate RRP for each batch
+        inputs = torch.split(input, batch_size)
+        relAs, relKs = [], [] 
+        for data in inputs: # 多批次数据叠加
+            relA, relK = self._generate_RRP(data, interpreted_series)
             relAs.append(relA)
             relKs.append(relK)
         relA = torch.stack(relAs).mean(0)
@@ -22,11 +21,10 @@ class RRP:
     def _generate_RRP(self, input, interpreted_series):
         """
         input (torch.Tensor):输入数据张量[total_batch， input_window, series_num, feature_dim]
-        interpreted_series (int)：被解释时间序列的索引。
+        interpreted_series (int)：被解释时间序列的索引的序号。
         """
-        # Forward pass through the model
-        output = self.model(input)
-        # 创建一个与输出形状相同的 one-hot 张量，仅在 interpreted_series 对应的位置设置为 1。
+        output = self.model(input) # 得到模型输出
+        # 创建一个与输出形状相同的 one-hot 张量，仅在序列序号所对应的位置设置为 1。
         one_hot = torch.zeros_like(output, dtype=torch.float).to(output.device)
         one_hot[:,:,interpreted_series,:] = 1
         # 克隆 one-hot 张量，并设置其需要计算梯度。

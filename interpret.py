@@ -2,7 +2,6 @@ import torch
 import numpy as np
 import data_loader.data_loaders as module_data
 import model.model as module_arch
-import model.loss as module_loss
 import argparse
 from copy import deepcopy
 from parse_config import ConfigParser
@@ -48,8 +47,6 @@ def load_model(path, args, name='Causality Detecting', run_id=None):
 # 使用K-means进行因果关系分析并构建因果图
 def analyze(relA, relK, m, n, time_step):
     """
-    
-    Args:
         relA (List[torch.Tensor]): 每个时间序列的注意力矩阵的相关性分数。
         relK (List[torch.Tensor]): 每个时间序列的因果卷积核的相关性分数。
         m (int): 考虑的顶部聚类数量。
