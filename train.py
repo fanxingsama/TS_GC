@@ -3,10 +3,9 @@ import collections
 import torch
 import numpy as np
 import data_loader.data_loaders as module_data
-import model.loss as module_loss
-import model.metric as module_metric
+import utils.loss_metric as module_metric
 import model.model as module_arch
-from parse_config import ConfigParser
+from utils.parse_config import ConfigParser
 from trainer import Trainer
 from utils import prepare_device
 
@@ -28,14 +27,9 @@ def main(config):
     model = config.init_obj('arch', module_arch, config) # 构建模型架构
     logger.info(model) # 打印模型架构
 
-    
-    device, device_ids = prepare_device(config['n_gpu']) # 准备训练模型的设备
+    device = prepare_device() # 准备训练模型的设备
     model = model.to(device) # 将模型加载到设备上
-    if len(device_ids) > 1: # 如果有多个GPU，则使用DataParallel
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
-
-    # 
-    criterion = getattr(module_loss, config['loss']) # 获取所需要使用的损失函数
+    criterion = getattr(module_metric, config['loss']) # 获取所需要使用的损失函数
     metrics = [getattr(module_metric, met) for met in config['metrics']] # 获取所需要使用的评估指标
 
     trainable_params = filter(lambda p: p.requires_grad, model.parameters()) # 获取需要训练的参数
@@ -60,15 +54,8 @@ if __name__ == '__main__':
     args = argparse.ArgumentParser(description='Causality')
     args.add_argument('-c', '--config', default=None, type=str,
                       help='config file path (default: None)')
-    args.add_argument('-r', '--resume', default=None, type=str,
-                      help='path to latest checkpoint (default: None)')
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
 
-    CustomArgs = collections.namedtuple('CustomArgs', 'flags type target')
-    options = [
-        CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
-        CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;batch_size')
-    ]
-    config = ConfigParser.from_args(args, options) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
+    config = ConfigParser.from_args(args=args) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
     main(config)

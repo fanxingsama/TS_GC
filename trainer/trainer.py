@@ -1,10 +1,7 @@
 import numpy as np
 import torch
-from torchvision.utils import make_grid
 from utils import inf_loop, MetricTracker
-from logger import TensorboardWriter
 from numpy import inf
-from sklearn.cluster import KMeans
 
 class Trainer:
     '''
@@ -70,16 +67,9 @@ class Trainer:
         self.start_epoch = 1
         self.checkpoint_dir = config.save_dir
 
-        # 设置可视化编写器实例  
-        self.writer = TensorboardWriter(config.log_dir, self.logger, cfg_trainer['tensorboard'])
-
         # 跟踪和计算各种指标的平均值
-        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
-        self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns], writer=self.writer)
-
-        # 如果之前保存的有检查点，从检查点恢复训练
-        if config.resume is not None:
-            self._resume_checkpoint(config.resume)
+        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns])
+        self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns])
             
         # 启用PyTorch异常检测（可选）
         torch.autograd.set_detect_anomaly(True)
@@ -136,13 +126,12 @@ class Trainer:
             # 模型的的训练过程
             self.optimizer.zero_grad()
             output = self.model(data)
-            loss = self.criterion(output, target) + self.lam * self.model.regularization()
+            loss = self.criterion(output, target) + self.lam * self.model.regularization() # 损失函数正则化
             loss.requires_grad_(True)
             loss.backward()
             self.optimizer.step()
             
             # 更新指标跟踪器和TensorBoard记录
-            self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
             for met in self.metric_ftns:
                 self.train_metrics.update(met.__name__, met(output, target))
@@ -184,15 +173,10 @@ class Trainer:
                 loss = self.criterion(output, target)
 
                 # 更新验证指标。
-                self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.valid_metrics.update('loss', loss.item())
                 for met in self.metric_ftns:
                     self.valid_metrics.update(met.__name__, met(output, target))
-                # self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
 
-        # 将模型参数的直方图添加到 TensorBoard
-        for name, p in self.model.named_parameters():
-            self.writer.add_histogram(name, p, bins='auto')
         return self.valid_metrics.result()
 
     # 计算并返回当前进度的字符串表示。 
@@ -233,33 +217,3 @@ class Trainer:
             best_path = str(self.checkpoint_dir / 'model_best.pth')
             torch.save(state, best_path)
             self.logger.info("Saving current best: model_best.pth ...")
-
-    # 从检查点恢复训练
-    def _resume_checkpoint(self, resume_path):
-        """
-        :param resume_path: Checkpoint path to be resumed
-        """
-        # 读取检查点并写入日志
-        resume_path = str(resume_path)
-        self.logger.info("Loading checkpoint: {} ...".format(resume_path))
-
-        # 加载检查点文件，并更新起始轮次和最佳监控指标值
-        checkpoint = torch.load(resume_path, weights_only=False)
-        self.start_epoch = checkpoint['epoch'] + 1
-        self.mnt_best = checkpoint['monitor_best']
-
-        # 检查检查点中的模型架构配置是否与当前配置一致，不一致就记录警告信息
-        if checkpoint['config']['arch'] != self.config['arch']:
-            self.logger.warning("Warning: Architecture configuration given in config file is different from that of "
-                              "checkpoint. This may yield an exception while state_dict is being loaded.")
-        self.model.load_state_dict(checkpoint['state_dict'])  # 加载模型状态字典
-
-        # 检查检查点中的优化器类型是否与当前配置一致，不一致就记录警告信息
-        if checkpoint['config']['optimizer']['type'] != self.config['optimizer']['type']:
-            self.logger.warning("Warning: Optimizer type given in config file is different from that of checkpoint. "
-                              "Optimizer parameters not being resumed.")
-        else:
-            self.optimizer.load_state_dict(checkpoint['optimizer'])  # 加载优化器状态字典
-
-        # 记录日志，确认检查点已成功加载
-        self.logger.info("Checkpoint loaded. Resume training from epoch {}".format(self.start_epoch))

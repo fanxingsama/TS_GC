@@ -1,6 +1,5 @@
 {
     "name": "Causality Learning",
-    "n_gpu": 1,
     "arch": {
         "type": "PredictModel",
         "args": {

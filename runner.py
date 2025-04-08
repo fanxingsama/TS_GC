@@ -1,5 +1,5 @@
 import argparse
-from parse_config import ConfigParser
+from utils.parse_config import ConfigParser
 from datetime import datetime
 import train
 import interpret
@@ -44,7 +44,6 @@ def runtask(label, args, dataset, ground_truth, task_name):
     # 构建一个字典，里面包含项目运行所需的基本参数
     args_dict = {'name':f'Batch Runner/{label}/{task_name}',
                  'config': args.config,
-                 'resume': None,
                  'device': args.device,
                  'data_dir': dataset}
     config = ConfigParser.from_args(args=args_dict, run_id='model') # 解析命令行参数
@@ -93,7 +92,7 @@ if __name__=="__main__":
     args = argparse.ArgumentParser(description='CausalityInterpret')
     args.add_argument('-c', '--config', default=None, type=str,
                       help='config file path (default: None)')
-    args.add_argument('-d', '--device', default="0", type=str,
+    args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
     args.add_argument('-t', '--task', default='fMRI', type=str,
                       help='task (default: fMRI)')

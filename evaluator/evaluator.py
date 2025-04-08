@@ -99,19 +99,19 @@ def evaluate(logger, gtfile, validatedcauses, columns):
     
     def serialization(data):
         return [f"{e[1]}->{e[0]}" for e in data]
-    logger.info(f"Total False Positives': {FP}")
-    logger.info(f"Total True Positives': {TP}")
-    logger.info(f"Total False Negatives: {FN}")
-    logger.info(f"Total Direct False Positives: {FPdirect}")
-    logger.info(f"Total Direct True Positives: {TPdirect}")
-    logger.info(f"TPs': {serialization(TPs)}")
-    logger.info(f"FPs': {serialization(FPs)}")
-    logger.info(f"TPs direct: {serialization(TPsdirect)}")
-    logger.info(f"FPs direct: {serialization(FPsdirect)}")
+    logger.info(f"假阳性': {FP}")
+    logger.info(f"真阳性': {TP}")
+    logger.info(f"假阴性: {FN}")
+    logger.info(f"直接误报总数: {FPdirect}")
+    logger.info(f"直接真阳性总数: {TPdirect}")
+    logger.info(f"真阳性序列': {serialization(TPs)}")
+    logger.info(f"假阳性序列': {serialization(FPs)}")
+    logger.info(f"直接真阳性序列: {serialization(TPsdirect)}")
+    logger.info(f"直接假阳性序列: {serialization(FPsdirect)}")
     logger.info(f"FNs: {serialization(FNs)}")
     precision = recall = 0.
 
-    logger.info('(includes direct and indirect causal relationships)')
+    logger.info('(包括直接和间接的因果关系)')
     if float(TP+FP)>0:
         precision = TP / float(TP+FP)
     logger.info(f"Precision': {precision}")
@@ -124,7 +124,7 @@ def evaluate(logger, gtfile, validatedcauses, columns):
         F1 = 0.
     logger.info(f"F1' score: {F1}")
 
-    logger.info('(includes only direct causal relationships)')
+    logger.info('(只包括直接的因果关系)')
     precision = recall = 0.
     if float(TPdirect+FPdirect)>0:
         precision = TPdirect / float(TPdirect+FPdirect)

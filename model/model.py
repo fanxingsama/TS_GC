@@ -528,7 +528,7 @@ class PredictModel(nn.Module):
         self.drop_prob = drop_prob
         self.tau = tau
 
-        self.device, device_ids = prepare_device(config['n_gpu'])
+        self.device = prepare_device()
 
         self.encoder = Encoder(series_num=self.series_num,
                                input_window=self.input_window,
