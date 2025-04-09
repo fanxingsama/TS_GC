@@ -163,7 +163,7 @@ class Trainer:
     
     # 训练后进行验证，对模型性能进行评估
     def _valid_epoch(self, epoch):
-        self.model.eval()
+        self.model.eval() # 设置模型为验证模式
         self.valid_metrics.reset()
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(self.valid_data_loader):

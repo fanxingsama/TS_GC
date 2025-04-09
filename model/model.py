@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
-from model.NonParamRP import *
+from model.RRP_model import *
 import math
 from utils import prepare_device
+from model.RRP_methods import *
 
 # 时序嵌入
 class Embedding(nn.Module):

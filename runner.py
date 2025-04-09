@@ -2,7 +2,7 @@ import argparse
 from utils.args_config_analyse import args_config_analyse
 from datetime import datetime
 import train
-import interpret
+import evaluator.interpret as interpret
 import torch
 import os
 import numpy as np
@@ -42,7 +42,7 @@ def runtask(label, args, dataset, ground_truth, task_name):
     np.random.seed(SEED)
 
     # 构建一个args字典，里面包含项目运行所需的基本参数
-    args_dict = {'name':f'Batch Runner/{label}/{task_name}',
+    args_dict = {'name':f'{label}/{task_name}',
                  'config': args.config,
                  'device': args.device,
                  'data_dir': dataset}
@@ -51,7 +51,7 @@ def runtask(label, args, dataset, ground_truth, task_name):
     train.main(config) # 训练模型
     torch.cuda.empty_cache() # 清理显存
     # 加载模型并进行解释
-    model, config, data_loader = interpret.load_model(f'saved/models/Batch Runner/{label}/{task_name}/model', args, f'Batch Runner/{label}/{task_name}', 'casuality')
+    model, config, data_loader = interpret.load_model(f'saved/models/{label}/{task_name}/model', args, f'{label}/{task_name}', 'casuality')
     interpret.main(model, config, data_loader, ground_truth) 
     torch.cuda.empty_cache()
 
@@ -68,7 +68,7 @@ def main(args):
     # 汇总结果
     results = [] # 存储每个任务的评估结果
     for task_name in task_list:
-        fname = f'{save_dir}/log/Batch Runner/{label}/{task_name}/casuality/info.log' # 查找每个任务的日志文件
+        fname = f'{save_dir}/log/{label}/{task_name}/casuality/info.log' # 查找每个任务的日志文件
         if os.path.exists(fname):
             with open(fname, 'r') as f: # 读取文件内容
                 lines = f.readlines()
@@ -83,7 +83,7 @@ def main(args):
                 }
                 results.append(result)
     df = pd.DataFrame(results, index=[i for i in range(1,len(results)+1)])
-    summary_dir = save_dir / 'log' / 'Batch Runner' / label / 'summary.csv'
+    summary_dir = save_dir / 'log' /  label / 'summary.csv'
     df.to_csv(summary_dir) # 保存结果到csv文件中
     print("===================总结===================")
     print('\t'+ df.to_string().replace('\n', '\n\t'))

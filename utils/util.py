@@ -5,6 +5,12 @@ from pathlib import Path
 from itertools import repeat
 from collections import OrderedDict
 
+# 安全地执行除法操作，避免除以零。
+def safe_divide(a, b):
+    den = b.clamp(min=1e-9) + b.clamp(max=1e-9)
+    den = den + den.eq(0).type(den.type()) * 1e-9
+    return a / den * b.ne(0).type(b.type())
+
 # 确保指定目录存在
 def ensure_dir(dirname):
     dirname = Path(dirname)

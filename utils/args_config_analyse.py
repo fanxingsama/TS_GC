@@ -20,9 +20,8 @@ class args_config_analyse:
         self._config = config
         self.resume = resume
         save_dir = Path(self.config['trainer']['save_dir']) # 根据配置文件中的 save_dir 和实验名称 name，创建保存模型和日志的目录。
-
         exper_name = self.config['name']
-        if run_id is None: # 使用时间戳作为默认的运行id
+        if run_id is None:
             run_id = datetime.now().strftime(r'%m%d_%H%M%S')
         # 指定保存的log的地方和格式
         self._save_dir = save_dir / 'models' / exper_name / run_id
