@@ -25,7 +25,6 @@ class Trainer:
                  data_loader, valid_data_loader=None, lr_scheduler=None, lam=0, len_epoch=None):
         self.config = config
         self.logger = get_logger('trainer', config['trainer']['verbosity'])
-
         self.model = model
         self.criterion = criterion
         self.metric_ftns = metric_ftns

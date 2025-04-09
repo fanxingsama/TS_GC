@@ -2,7 +2,7 @@ import argparse
 from utils.args_config_analyse import args_config_analyse
 from datetime import datetime
 import train
-import evaluator.interpret as interpret
+import interpret as interpret
 import torch
 import os
 import numpy as np
@@ -29,9 +29,18 @@ def construct_fMRI():
         }
     return task_list
 
+def construct_CCPAD():
+    task_list = {}
+    task_list['CCPAD'] = {
+        'dataset': "data/CCPAD/train.csv",
+        'groundtruth': "data/CCPAD/train_gt_processed.csv" 
+    }
+    return task_list
+
 tasks={
     'demo': construct_demo,
     'fMRI': construct_fMRI,
+    'CCPAD': construct_CCPAD
 }    
 
 def runtask(label, args, dataset, ground_truth, task_name):
