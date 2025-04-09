@@ -41,11 +41,7 @@ class args_config_analyse:
 
     # 从命令行参数中解析配置文件，并返回一个args_config_analyse对象。
     @classmethod
-    def from_args(aca, args, options='', run_id=None):
-        # run_id：唯一标识符，用于保存检查点和日志
-        for opt in options:
-            args.add_argument(*opt.flags, default=None, type=opt.type)
-        
+    def from_args(aca, args, run_id=None):
         # 如果args是字典，则将其转换为argparse.Namespace对象
         if isinstance(args, dict):
             args = argparse.Namespace(**args)

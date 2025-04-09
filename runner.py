@@ -79,7 +79,7 @@ def main(args):
     for task_name in task_list:
         fname = f'{save_dir}/log/{label}/{task_name}/casuality/info.log' # 查找每个任务的日志文件
         if os.path.exists(fname):
-            with open(fname, 'r') as f: # 读取文件内容
+            with open(fname, 'r', encoding='utf-8') as f: # 读取文件内容
                 lines = f.readlines()
                 result={ # 将结果保存到字典中
                     "Precision'": float(lines[-8].split(':')[-1][:-1]),
