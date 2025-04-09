@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from utils import inf_loop, MetricTracker
 from numpy import inf
+from logger.logger import get_logger
 
 class Trainer:
     '''
@@ -23,7 +24,7 @@ class Trainer:
     def __init__(self, model, criterion, metric_ftns, optimizer, config, device,
                  data_loader, valid_data_loader=None, lr_scheduler=None, lam=0, len_epoch=None):
         self.config = config
-        self.logger = config.get_logger('trainer', config['trainer']['verbosity'])
+        self.logger = get_logger('trainer', config['trainer']['verbosity'])
 
         self.model = model
         self.criterion = criterion

@@ -7,6 +7,7 @@ from copy import deepcopy
 from utils.args_config_analyse import args_config_analyse
 from evaluator.evaluator import evaluate, getextendeddelays, evaluatedelay
 from utils import prepare_device
+from logger.logger import get_logger
 from sklearn.cluster import KMeans
 
 SEED = 123
@@ -142,7 +143,7 @@ def eval(logger, gt, allcauses, alldelays, columns):
 
 
 def main(model, config, data_loader, gt):
-    logger = config.get_logger('train')
+    logger = get_logger('train')
     logger.info("===================开始运行interpret===================")
     attribution_generator = RRP(model) # 创建RRP解释器
     logger.info("ground_truth:"+ (gt if gt else "None"))

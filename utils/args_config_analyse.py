@@ -1,10 +1,7 @@
 import os
-import logging
-import torch
 import argparse
 from pathlib import Path
-from functools import reduce, partial
-from operator import getitem
+from functools import  partial
 from datetime import datetime
 from logger import setup_logging
 from utils import read_json, write_json
@@ -27,24 +24,21 @@ class args_config_analyse:
         exper_name = self.config['name']
         if run_id is None: # 使用时间戳作为默认的运行id
             run_id = datetime.now().strftime(r'%m%d_%H%M%S')
+        # 指定保存的log的地方和格式
         self._save_dir = save_dir / 'models' / exper_name / run_id
         self._log_dir = save_dir / 'log' / exper_name / run_id
 
-        # 创建保存检查点和日志的目录。
-        exist_ok = run_id == ''
-        self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
+        exist_ok = run_id == '' # 如果 run_id 是空字符串，exist_ok 被设置为 True。如果不是空字符串，则 exist_ok 被设置为 False
+        '''
+        调用了 pathlib.Path.mkdir 方法来创建目录。
+        parents=True：表示如果目标目录的父目录不存在，会自动创建所有必要的父目录。
+        如果 exist_ok=True，则当目标目录已经存在时，不会抛出异常，mkdir 方法会正常执行。
+        '''
+        self.save_dir.mkdir(parents=True, exist_ok=exist_ok) 
         self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
 
-        # 将更新后的配置文件保存到检查点目录中。
-        write_json(self.config, self.save_dir / 'config.json')
-
-        # 配置日志模块
-        setup_logging(self.log_dir)
-        self.log_levels = {
-            0: logging.WARNING,
-            1: logging.INFO,
-            2: logging.DEBUG
-        }
+        write_json(self.config, self.save_dir / 'config.json') # 保存模型的运行参数和配置
+        setup_logging(self.log_dir) # 保存模型的运行log
 
     # 从命令行参数中解析配置文件，并返回一个args_config_analyse对象。
     @classmethod
@@ -101,13 +95,6 @@ class args_config_analyse:
     def __getitem__(self, name):
         return self.config[name]
 
-    # 获取日志记录器。
-    def get_logger(self, name, verbosity=2):
-        msg_verbosity = 'verbosity option {} is invalid. Valid options are {}.'.format(verbosity, self.log_levels.keys())
-        assert verbosity in self.log_levels, msg_verbosity
-        logger = logging.getLogger(name)
-        logger.setLevel(self.log_levels[verbosity])
-        return logger
 
      # 采用property装饰器，让_config、_save_dir、_log_dir等属性都能够被直接取用，可以直接采用属性的方式获取
     # 比如con = ConfigParser(xx),之后con.config就是获取的_config

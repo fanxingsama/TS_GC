@@ -85,7 +85,7 @@ def main(args):
     df = pd.DataFrame(results, index=[i for i in range(1,len(results)+1)])
     summary_dir = save_dir / 'log' / 'Batch Runner' / label / 'summary.csv'
     df.to_csv(summary_dir) # 保存结果到csv文件中
-    print("===================Summary===================")
+    print("===================总结===================")
     print('\t'+ df.to_string().replace('\n', '\n\t'))
 
 

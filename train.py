@@ -5,6 +5,7 @@ import data_loader.data_loaders as module_data
 import utils.loss_metric as module_metric
 import model.model as module_arch
 from utils.args_config_analyse import args_config_analyse
+from logger.logger import get_logger
 from trainer import Trainer
 from utils import prepare_device
 
@@ -15,8 +16,7 @@ torch.backends.cudnn.benchmark = False
 np.random.seed(SEED)
 
 def main(config):
-    logger = config.get_logger('train') # 日志记录器
-
+    logger = get_logger(name='train') # 日志记录器
     data_loader = config.init_obj('data_loader', module_data) # 初始化数据加载器
     valid_data_loader = data_loader.split_validation() # 分离出验证集
     config['data_loader']['args']['series_num'] = data_loader.series_num # 设置数据加载器参数
