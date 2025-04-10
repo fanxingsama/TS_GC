@@ -1,5 +1,4 @@
 {
-    "name": "Causality Learning",
     "arch": {
         "type": "PredictModel",
         "args": {
@@ -14,7 +13,7 @@
     "data_loader": {
         "type": "TimeseriesDataLoader",
         "args": {
-            "data_dir": "data/fMRI/timeseries4.csv",
+            "data_dir": "data/fMRI/timeseries1.csv",
             "batch_size": 128,
             "time_step": 32,
             "output_window": 31,
@@ -44,11 +43,7 @@
     },
     "trainer": {
         "epochs": 500,
-        "save_dir": "saved/",
-        "save_period": 1, 
-        "verbosity": 0,
-        "lam": 0,
-        "tensorboard": true
+        "lam": 0
     },
     "explainer": {
         "m": 1,

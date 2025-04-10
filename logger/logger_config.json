@@ -4,7 +4,7 @@
     "disable_existing_loggers": false, 
     "formatters": {
         "simple": {"format": "%(message)s"}, 
-        "datetime": {"format": " 时间：%(asctime)s - %(name)s - 等级：%(levelname)s - 日志内容：%(message)s"}
+        "datetime": {"format": "日志内容：%(message)s"}
     }, 
     "handlers": {
         "console": {

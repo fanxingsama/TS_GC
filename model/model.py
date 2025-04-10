@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from model.RRP_model import *
 import math
-from utils import prepare_device
 from model.RRP_methods import *
 
 # 时序嵌入
@@ -529,7 +528,6 @@ class PredictModel(nn.Module):
         self.drop_prob = drop_prob
         self.tau = tau
 
-        self.device = prepare_device()
 
         self.encoder = Encoder(series_num=self.series_num,
                                input_window=self.input_window,
@@ -540,7 +538,7 @@ class PredictModel(nn.Module):
                                ffn_hidden=self.ffn_hidden,
                                drop_prob=self.drop_prob,
                                tau=self.tau,
-                               device=self.device)
+                               device=torch.device("cuda"))
         
         self.fc = Linear(in_features=self.feature_dim, out_features=self.output_dim, bias=True)
         # He Initialization

@@ -61,7 +61,7 @@ def runtask(label, args, dataset, ground_truth, task_name):
     torch.cuda.empty_cache() # 清理显存
     # 加载模型并进行解释
     model, config, data_loader = interpret.load_model(f'saved/models/{label}/{task_name}/model', args, f'{label}/{task_name}', 'casuality')
-    interpret.main(model, config, data_loader, ground_truth) 
+    interpret.main(model, config, data_loader, ground_truth, f'saved/models/{label}/{task_name}/model') 
     torch.cuda.empty_cache()
 
 def main(args):

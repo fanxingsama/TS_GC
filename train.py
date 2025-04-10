@@ -1,13 +1,14 @@
 import argparse
+from pathlib import Path
 import torch
 import numpy as np
 import data_loader.data_loaders as module_data
 import utils.loss_metric as module_metric
 import model.model as module_arch
-from utils.args_config_analyse import args_config_analyse
-from logger.logger import get_logger
+from datetime import datetime
+from logger.logger import get_logger, setup_logging
 import time
-from utils import inf_loop, MetricTracker
+from utils import inf_loop, init_obj_by_config, from_args, write_json
 from numpy import inf
 
 SEED = 123
@@ -30,17 +31,16 @@ class Trainer:
     len_epoch：每个 epoch 的迭代次数（可选，用于迭代式训练）
     '''
     def __init__(self, model, criterion, metric_ftns, optimizer, config,
-                 data_loader, valid_data_loader=None, lr_scheduler=None, lam=0, len_epoch=None):
+                 data_loader, logger, run_id, valid_data_loader=None, lr_scheduler=None, lam=0, len_epoch=None):
         self.config = config
-        self.logger = get_logger('trainer', config['trainer']['verbosity'])
-
+        self.logger = logger
         self.model = model.cuda()
         self.criterion = criterion
         self.metric_ftns = metric_ftns
         self.optimizer = optimizer
+        self.run_id = run_id
         self.data_loader = data_loader
         self.early_stop = 10
-        self.monitor = "min val_loss"
         
         # 根据 len_epoch 是否为 None，决定是基于 epoch 还是基于迭代进行训练。
         if len_epoch is None:
@@ -58,68 +58,52 @@ class Trainer:
         # 从配置文件读取训练器设置
         cfg_trainer = config['trainer']
         self.epochs = cfg_trainer['epochs']
-        self.save_period = cfg_trainer['save_period']
 
         # 配置以监视模型性能并最佳保存
-        self.mnt_mode, self.mnt_metric = self.monitor.split()
-        assert self.mnt_mode in ['min', 'max']
-        self.mnt_best = inf if self.mnt_mode == 'min' else -inf
-
-        self.checkpoint_dir = config.save_dir
+        self.mnt_best = inf
 
         # 跟踪和计算各种指标的平均值
-        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns])
-        self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metric_ftns])
+        self.train_metrics = {'loss': 0.0}  # 初始化训练指标
+        self.valid_metrics = {'loss': 0.0}  # 初始化验证指标
+        for m in metric_ftns:
+            self.train_metrics[m.__name__] = 0.0
+            self.valid_metrics[m.__name__] = 0.0
+        
+         # 添加计数器和总样本数用于计算平均值
+        self.train_count = 0
+        self.valid_count = 0
 
 
     # 训练过程中的性能监控
     def train(self):
         not_improved_count = 0  # 未改进计数器，用于记录连续未改进的轮数。
         for epoch in range(1, self.epochs + 1):
-
             print(f"==================第{epoch}轮训练====================")
-
             result = self._train_epoch(epoch)
-            
-           # 将轮次和训练结果存储到日志字典中
-            log = {'epoch': epoch}
-            log.update(result)
-            for key, value in log.items():  # 遍历日志字典，记录每个键值对到日志。
-                self.logger.info('    {:15s}: {}'.format(str(key), value))
-
             # 监控模型的性能
             best = False
-
-            try:
-                improved = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.mnt_best) or \
-                        (self.mnt_mode == 'max' and log[self.mnt_metric] >= self.mnt_best)
-            except KeyError:
-                self.logger.warning("Warning: Metric '{}' is not found. "
-                                "Model performance monitoring is disabled.".format(self.mnt_metric))
-                self.mnt_mode = 'off'
-                improved = False
-
+            improved = self.train_metrics['val_loss'] <= self.mnt_best
             if improved:  # 如果改进，则更新最佳性能值，重置未改进计数器，并标记为最佳轮次。
-                self.mnt_best = log[self.mnt_metric]
+                self.mnt_best = self.train_metrics['val_loss']
                 not_improved_count = 0
                 best = True
             else:  # 如果未改进，则增加未改进计数器
                 not_improved_count += 1
-
             # 如果未改进计数器超过早停轮数，则停止训练。
             if not_improved_count > self.early_stop:
-                self.logger.info("Validation performance didn\'t improve for {} epochs. "
-                                "Training stops.".format(self.early_stop))
+                self.logger.info(f"一共训练了{epoch}轮，模型的最终结果：{result}")
                 break
-            
-            # 如果当前轮次是保存周期的倍数，则保存检查点。
-            if epoch % self.save_period == 0:
+            # 保存检查点。
+            if epoch % 1 == 0:
                 self._save_checkpoint(epoch, save_best=best)
-
     # 模型训练一个epoch
     def _train_epoch(self, epoch):
         self.model.train()  # 设置模型为训练模式
-        self.train_metrics.reset()
+        # 重置指标和计数器
+        self.train_metrics = {k: 0.0 for k in self.train_metrics}
+        self.train_count = 0
+        
+        # self.train_metrics.reset()
         epoch_loss = 0.0
         batch_count = 0
         
@@ -142,21 +126,26 @@ class Trainer:
             batch_count += 1
             
             # 更新指标跟踪器
-            self.train_metrics.update('loss', loss.item())
+            batch_size = data.size(0)
+            self.train_count += batch_size
+            self.train_metrics['loss'] += loss.item() * batch_size
             for met in self.metric_ftns:
-                self.train_metrics.update(met.__name__, met(output, target))
-
-            if batch_idx == self.len_epoch:
-                break
+                self.train_metrics[met.__name__] += met(output, target) * batch_size
         
+        
+        # 计算平均指标
+        for k in self.train_metrics:
+            self.train_metrics[k] /= self.train_count
+            
         end_time = time.time()  # 记录训练周期结束时间
         train_time = end_time - start_time  # 计算训练时间
-        log = self.train_metrics.result()
 
-        # 如果有验证数据加载器，进行验证
+        # 验证（如果存在验证集）
         if self.do_validation:
-            val_log = self._valid_epoch(epoch)
-            log.update(**{'val_'+k : v for k, v in val_log.items()})
+            val_log = self._valid_epoch()
+            # 将验证指标合并到训练指标，并添加 "val_" 前缀
+            for k, v in val_log.items():
+                self.train_metrics[f'val_{k}'] = v
 
         # 如果有学习率调度器，更新学习率。
         if self.lr_scheduler is not None:
@@ -164,17 +153,21 @@ class Trainer:
 
         # 打印训练时间
         print(f" 训练时间: {train_time:.2f} s")
-        print(f"训练结果: {log}")
+        print(f"训练结果: {self.train_metrics}")
         
         
         # 返回日志
-        return log
+        return self.train_metrics  # 直接返回字典
     
     # 训练后进行验证，对模型性能进行评估
-    def _valid_epoch(self, epoch):
+    def _valid_epoch(self):
         self.model.eval() # 设置模型为验证模式
+         # 重置验证指标和计数器
+        self.valid_metrics = {k: 0.0 for k in self.valid_metrics}
+        self.valid_count = 0
+        
         start_time = time.time()  # 记录验证周期开始时间
-        self.valid_metrics.reset()
+
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(self.valid_data_loader):
                 data, target = data.cuda(), target.cuda()
@@ -183,16 +176,22 @@ class Trainer:
                 output = self.model(data)
                 loss = self.criterion(output, target)
 
-                # 更新验证指标。
-                self.valid_metrics.update('loss', loss.item())
+                # 更新验证指标（累加）
+                batch_size = data.size(0)
+                self.valid_count += batch_size
+                self.valid_metrics['loss'] += loss.item() * batch_size
                 for met in self.metric_ftns:
-                    self.valid_metrics.update(met.__name__, met(output, target))
+                    self.valid_metrics[met.__name__] += met(output, target) * batch_size
+        # 计算平均指标
+        for k in self.valid_metrics:
+            self.valid_metrics[k] /= self.valid_count
+            
         end_time = time.time()  # 记录验证周期结束时间
         val_time = end_time - start_time  # 计算验证时间
         print(f"验证时间: {val_time:.2f} s")
-        print(f"验证结果: {self.valid_metrics.result()}")
+        print(f"验证结果: {self.valid_metrics}")
         
-        return self.valid_metrics.result()
+        return self.valid_metrics  # 返回验证指标字典
 
     # 保存检查点
     def _save_checkpoint(self, epoch, save_best=False):
@@ -207,40 +206,49 @@ class Trainer:
         }
 
         # 构建检查点文件名，并保存检查点到文件。
-        filename = str(self.checkpoint_dir / 'checkpoint-epoch{}.pth'.format(epoch))
+        filename = Path('saved') / self.run_id / 'model' / 'checkpoint-epoch{}.pth'.format(epoch)
         torch.save(state, filename)
-        self.logger.info("Saving checkpoint: {} ...".format(filename))
 
         # 如果是最佳轮次，则将检查点重命名为 'model_best.pth' 并保存。
         if save_best:
-            best_path = str(self.checkpoint_dir / 'model_best.pth')
+            best_path = Path('saved') / self.run_id  / 'model' / 'model_best.pth'
             torch.save(state, best_path)
-            self.logger.info("Saving current best: model_best.pth ...")
 
 def main(config):
-    logger = get_logger(name='train') # 日志记录器
-    data_loader = config.init_obj('data_loader', module_data) # 初始化数据加载器
+    run_id = datetime.now().strftime(r'%m%d_%H%M%S')
+    log_save_path = Path('saved') / run_id / 'train_result_log'
+    log_save_path.mkdir(parents=True, exist_ok=True)
+    filename = Path('saved') / run_id / 'model'
+    filename.mkdir(parents=True, exist_ok=True)
+    setup_logging(log_save_path)
+    train_logger = get_logger() # 日志记录器
+    write_json(config, Path('saved') / run_id / 'model_config.json') # 模型超参数保存
+    
+    data_loader = init_obj_by_config(config, 'data_loader', module_data) # 初始化数据加载器
     valid_data_loader = data_loader.split_validation() # 分离出验证集
     
     config['data_loader']['args']['series_num'] = data_loader.series_num # 设置数据加载器参数
     config['data_loader']['args']['time_step'] = data_loader.time_step 
     config['data_loader']['args']['output_window'] = data_loader.output_window
     
-    model = config.init_obj('arch', module_arch, config) # 构建模型架构
-    logger.info(model) # 打印模型架构
+    model = init_obj_by_config(config, 'arch', module_arch, config) # 构建模型架构
+    train_logger.info(model) # 模型架构保存
+    train_logger.info("==============模型训练开始==============") # 打印模型架构
     model = model.cuda() # 将模型加载到设备上
     criterion = getattr(module_metric, config['loss']) # 获取所需要使用的损失函数
     metrics = [getattr(module_metric, met) for met in config['metrics']] # 获取所需要使用的评估指标
 
     trainable_params = filter(lambda p: p.requires_grad, model.parameters()) # 获取需要训练的参数
-    optimizer = config.init_obj('optimizer', torch.optim, trainable_params) # 构建优化器
-    lr_scheduler = config.init_obj('lr_scheduler', torch.optim.lr_scheduler, optimizer) # 构建学习率调整器
+    optimizer = init_obj_by_config(config, 'optimizer', torch.optim, trainable_params) # 构建优化器
+    lr_scheduler = init_obj_by_config(config, 'lr_scheduler', torch.optim.lr_scheduler, optimizer) # 构建学习率调整器
     lam = config['trainer']['lam'] # 获取训练相关参数
 
     # 开始训练模型
     trainer = Trainer(model, criterion, metrics, optimizer,
                       config=config,
                       data_loader=data_loader,
+                      logger= train_logger,
+                      run_id=run_id,
                       valid_data_loader=valid_data_loader,
                       lr_scheduler=lr_scheduler,
                       lam = lam)
@@ -257,6 +265,8 @@ if __name__ == '__main__':
                       help='config file path (default: None)')
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
-
-    config = args_config_analyse.from_args(args=args) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
+    args.add_argument('-t', '--task', default='fMRI', type=str,
+                        help='task (default: fMRI)')
+    config = from_args(args=args) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
     main(config)
+    torch.cuda.empty_cache() # 清理显存
