@@ -4,6 +4,8 @@ import data_loader.data_loaders as module_data
 import model.model as module_arch
 from model.k_means import K_means_analyze
 import argparse
+import os
+import pandas as pd
 from copy import deepcopy
 from utils.args_config_analyse import args_config_analyse
 from evaluator.evaluator import evaluate, getextendeddelays, evaluatedelay
@@ -16,7 +18,6 @@ torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 np.random.seed(SEED)
-
 
 
 # 加载预训练的模型以及其配置
@@ -35,14 +36,13 @@ def load_model(path, args, name='Causality Detecting', run_id=None):
     
     model = config.init_obj('arch', module_arch, config) # 根据配置文件初始化模型
 
-    device = prepare_device() # 获取所使用的设备
-    model = model.to(device) # 把模型放到设备上
+    model = model.cuda() # 把模型放到设备上
     checkpoint = torch.load(checkpoint_path, weights_only=False) # 加载训练好的模型
     model.load_state_dict(checkpoint['state_dict']) # 让模型加载参数
     return model, config, data_loader
 
 
-def main(model, config, data_loader, gt):
+def main(model, config, data_loader, gt, model_path):
     logger = get_logger('train')
     logger.info("===================开始运行模型结果评估===================")
     attribution_generator = RRP(model) # 创建RRP解释器
@@ -79,6 +79,23 @@ def main(model, config, data_loader, gt):
     for e in ans:
         logger.info(f"{columns[e[0]]} causes {columns[e[1]]} with a delay of {e[2]} time steps.")
 
+    # 保存因果图结构到CSV文件
+    causal_data = []
+    for e in ans:
+        causal_data.append({
+            "source": columns[e[0]],  # 头结点
+            "target": columns[e[1]],  # 尾结点
+            "delay": e[2]             # 延迟时间
+        })
+    
+    # 创建DataFrame
+    causal_df = pd.DataFrame(causal_data)
+    
+    # 确定保存路径与原模型在同一目录
+    csv_path = os.path.join(os.path.dirname(model_path), "causal_structure.csv")
+    causal_df.to_csv(csv_path, index=False)
+    logger.info(f"因果图结构已保存到: {csv_path}")
+
     # 评估因果关系
     allcauses={i:[] for i in range(len(columns))} # 时间序列因变量列表
     alldelays={} # 因果关系延迟列表
@@ -102,6 +119,10 @@ if __name__ == '__main__':
     args = args.parse_args() 
     # 加载模型
     def render(args):
-        return load_model('saved/models/0409_110318', args), 'data/fMRI/sim1_gt_processed.csv'
-    (model, config, data_loader), gt = render(args)
-    main(model, config, data_loader, gt) # 开始评估
+        model_path = 'saved/models/0410_152831/FMRI15/model'
+        # model_path = 'saved/models/0410_104535'
+        # gt_path = 'data/fMRI/sim1_gt_processed.csv'
+        gt_path = None
+        return load_model(model_path, args), gt_path, model_path
+    (model, config, data_loader), gt, model_path = render(args)
+    main(model, config, data_loader, gt, model_path) # 开始评估

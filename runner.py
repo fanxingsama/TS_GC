@@ -32,7 +32,7 @@ def construct_fMRI():
 def construct_CCPAD():
     task_list = {}
     task_list['CCPAD'] = {
-        'dataset': "data/CCPAD/train.csv",
+        'dataset': "data/CCPAD/small_train_1.csv",
         'groundtruth': "data/CCPAD/train_gt_processed.csv" 
     }
     return task_list

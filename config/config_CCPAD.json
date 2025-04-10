@@ -15,7 +15,7 @@
         "type": "TimeseriesDataLoader",
         "args": {
             "data_dir": "data/CCPAD/train.csv",
-            "batch_size": 128,
+            "batch_size": 64,
             "time_step": 32,
             "output_window": 31,
             "feature_dim": 1,
