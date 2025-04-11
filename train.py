@@ -217,7 +217,6 @@ class Trainer:
 def main(config):
     run_id = datetime.now().strftime(r'%m%d_%H%M%S')
     log_save_path = Path('saved') / run_id / 'train_result_log'
-    log_save_path.mkdir(parents=True, exist_ok=True)
     filename = Path('saved') / run_id / 'model'
     filename.mkdir(parents=True, exist_ok=True)
     setup_logging(log_save_path)

@@ -1,3 +1,4 @@
+from pathlib import Path
 import torch
 import numpy as np
 import data_loader.data_loaders as module_data
@@ -9,8 +10,9 @@ import pandas as pd
 from copy import deepcopy
 from utils.args_config_analyse import args_config_analyse
 from evaluator.evaluator import evaluate, getextendeddelays, evaluatedelay
-from logger.logger import get_logger
+from logger.logger import get_logger, setup_logging
 from model.RRP_model import RRP
+from utils.util import init_obj_by_config, read_json, init_obj_by_config
 
 SEED = 123
 torch.manual_seed(SEED)
@@ -20,28 +22,22 @@ np.random.seed(SEED)
 
 
 # 加载预训练的模型以及其配置
-def load_model(path, args, name='Causality Detecting', run_id=None):
-    config_path = path + '/config.json'
-    checkpoint_path = path + '/model_best.pth'
-    args_dict = {'name': name,
-                 'config': config_path,
-                 'device': args.device}
-    config = args_config_analyse.from_args(args=args_dict, run_id=run_id) # 解析配置文件
-
-    data_loader = config.init_obj('data_loader', module_data) # 根据config的配置项内容，初始化一个数据加载器对象
+def load_model(config, model_path):
+    data_loader = init_obj_by_config(config, 'data_loader', module_data) # 初始化数据加载器
     config['data_loader']['args']['series_num']=data_loader.series_num
     config['data_loader']['args']['time_step']=data_loader.time_step
     config['data_loader']['args']['output_window']=data_loader.output_window
     
-    model = config.init_obj('arch', module_arch, config) # 根据config的配置项内容，初始化模型
+    model = init_obj_by_config('arch', module_arch, config) # 根据config的配置项内容，初始化模型
     model = model.cuda() # 把模型放到设备上
-    checkpoint = torch.load(checkpoint_path, weights_only=False) # 加载训练好的模型
+    checkpoint = torch.load(model_path, weights_only=False) # 加载训练好的模型
     model.load_state_dict(checkpoint['state_dict']) # 让模型加载参数
-    return model, config, data_loader
+    return model, data_loader
 
 
-def main(model, config, data_loader, gt_path, model_path):
-    logger = get_logger()
+def main(model, config, data_loader, gt_path, log_path):
+    setup_logging(log_path)
+    interpret_logger = get_logger()
     print("===================开始运行模型结果评估===================")
     RRP_interpreter = RRP(model) # 创建RRP解释器
     print("已有的真实关系文件路径:"+ (gt_path if gt_path else "None"))
@@ -72,9 +68,9 @@ def main(model, config, data_loader, gt_path, model_path):
     ans = K_means_analyze(relA, relK, m, n, config['data_loader']['args']['time_step']) # 用K-means对相关性分数进行聚类
 
     # 打印因果关系结果
-    logger.info("===================因果关系结果===================")
+    interpret_logger.info("===================因果关系结果===================")
     for e in ans:
-        logger.info(f"{columns[e[0]]} causes {columns[e[1]]} with a delay of {e[2]} time steps.")
+        interpret_logger.info(f"{columns[e[0]]} causes {columns[e[1]]} with a delay of {e[2]} time steps.")
 
     # 保存因果图结构到CSV文件
     causal_data = []
@@ -89,9 +85,8 @@ def main(model, config, data_loader, gt_path, model_path):
     causal_df = pd.DataFrame(causal_data)
     
     # 确定保存路径与原模型在同一目录
-    csv_path = os.path.join(os.path.dirname(model_path), "causal_structure.csv")
+    csv_path = os.path.join(log_path, "causal_structure.csv")
     causal_df.to_csv(csv_path, index=False)
-    logger.info(f"因果图结构已保存到: {csv_path}")
 
     # 评估因果关系
     allcauses={i:[] for i in range(len(columns))} # 时间序列因变量列表
@@ -101,25 +96,21 @@ def main(model, config, data_loader, gt_path, model_path):
         alldelays[(causal[1],causal[0])]=causal[2]
 
     if gt_path: # 如果提供了真实因果关系图，则进行评估
-        logger.info("===================对比真实因果图之后因果关系的评估===================")
-        FP, TP, FPdirect, TPdirect, FN, FPs, FPsdirect, TPs, TPsdirect, FNs, F1, F1direct = evaluate(logger, gt_path, allcauses, columns) # 得到模型的各项指标
+        interpret_logger.info("===================对比真实因果图之后因果关系的评估===================")
+        FP, TP, FPdirect, TPdirect, FN, FPs, FPsdirect, TPs, TPsdirect, FNs, F1, F1direct = evaluate(interpret_logger, gt_path, allcauses, columns) # 得到模型的各项指标
         extendeddelays, readgt, extendedreadgt = getextendeddelays(gt_path, columns) # 获得因果时间延迟
         percentagecorrect = evaluatedelay(extendeddelays, alldelays, TPs, 1)*100 # 得到模型发现的时间延迟与真实延迟的匹配程度
-        logger.info(f"正确发现的延迟百分比: {percentagecorrect}%")
+        interpret_logger.info(f"正确发现的延迟百分比: {percentagecorrect}%")
 
 
 # 如果这个脚本单独运行
 if __name__ == '__main__':
-    args = argparse.ArgumentParser(description='CausalityInterpret')
-    args.add_argument('-d', '--device', default=None, type=str,
-                      help='indices of GPUs to enable (default: all)')
-    args = args.parse_args() 
-    # 加载模型
-    def render(args):
-        model_path = 'saved/models/0410_152831/FMRI15/model'
-        # model_path = 'saved/models/0410_104535'
-        gt_path = None
-        # gt_path = 'data/fMRI/sim1_gt_processed.csv'
-        return load_model(model_path, args), gt_path, model_path
-    (model, config, data_loader), gt_path, model_path = render(args)
-    main(model, config, data_loader, gt_path, model_path) # 开始评估
+    run_id = '0410_152831'
+    log_path = Path('saved')/ run_id / 'model_interpret'
+    model_path = Path('saved')/ run_id / 'model/model_best.pth'
+    model_config_path = Path('config/config_FMRI.json')
+    gt_path = None
+    # gt_path = 'data/fMRI/sim1_gt_processed.csv'
+    config = read_json(model_config_path) 
+    model, data_loader = load_model(config, model_path)
+    main(model, config, data_loader, gt_path, log_path) # 开始评估
