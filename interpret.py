@@ -28,7 +28,7 @@ def load_model(config, model_path):
     config['data_loader']['args']['time_step']=data_loader.time_step
     config['data_loader']['args']['output_window']=data_loader.output_window
     
-    model = init_obj_by_config('arch', module_arch, config) # 根据config的配置项内容，初始化模型
+    model = init_obj_by_config(config, 'arch', module_arch, config) # 根据config的配置项内容，初始化模型
     model = model.cuda() # 把模型放到设备上
     checkpoint = torch.load(model_path, weights_only=False) # 加载训练好的模型
     model.load_state_dict(checkpoint['state_dict']) # 让模型加载参数
@@ -105,9 +105,9 @@ def main(model, config, data_loader, gt_path, log_path):
 
 # 如果这个脚本单独运行
 if __name__ == '__main__':
-    run_id = '0410_152831'
-    log_path = Path('saved')/ run_id / 'model_interpret'
-    model_path = Path('saved')/ run_id / 'model/model_best.pth'
+    run_id = '0410_235127'
+    log_path = Path('saved') / run_id / 'model_interpret'
+    model_path = Path('saved') / run_id / 'model/model_best.pth'
     model_config_path = Path('config/config_FMRI.json')
     gt_path = None
     # gt_path = 'data/fMRI/sim1_gt_processed.csv'

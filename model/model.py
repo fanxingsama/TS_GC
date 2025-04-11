@@ -556,7 +556,7 @@ class PredictModel(nn.Module):
         return self.encoder.regularization()
     
     def relprop(self, rel):
-        pad = torch.zeros((rel.shape[0],self.input_window-self.output_window,rel.shape[2],rel.shape[3])).to(self.device)
+        pad = torch.zeros((rel.shape[0],self.input_window-self.output_window,rel.shape[2],rel.shape[3])).to('cuda')
         rel = torch.cat((pad,rel),1)
         rel = rel.permute(0, 2, 1, 3)
         rel = self.fc.relprop(rel)
