@@ -98,7 +98,7 @@ Config files are in `.json` format:
     }                
   },
   "data_loader": {
-    "type": "TimeseriesDataLoader",    // selecting data loader
+    "type": "DataLoader",    // selecting data loader
     "args":{
       "data_dir": "data/",             // dataset path
       "batch_size": 64,                // batch size

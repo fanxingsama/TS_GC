@@ -11,6 +11,8 @@ import time
 from utils import inf_loop, init_obj_by_config, from_args, write_json
 from numpy import inf
 
+from utils.util import read_json
+
 SEED = 123
 torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
@@ -214,8 +216,7 @@ class Trainer:
             best_path = Path('saved') / self.run_id  / 'model' / 'model_best.pth'
             torch.save(state, best_path)
 
-def main(config):
-    run_id = datetime.now().strftime(r'%m%d_%H%M%S')
+def main(config, run_id):
     log_save_path = Path('saved') / run_id / 'train_result_log'
     filename = Path('saved') / run_id / 'model'
     filename.mkdir(parents=True, exist_ok=True)
@@ -230,7 +231,7 @@ def main(config):
     config['data_loader']['args']['time_step'] = data_loader.time_step 
     config['data_loader']['args']['output_window'] = data_loader.output_window
     
-    model = init_obj_by_config(config, 'arch', module_arch, config) # 构建模型架构
+    model = init_obj_by_config(config, 'model', module_arch, config) # 构建模型架构,最后加个config是因为model在初始化的时候需要这个参数
     train_logger.info(model) # 模型架构保存
     train_logger.info("==============模型训练开始==============") # 打印模型架构
     model = model.cuda() # 将模型加载到设备上
@@ -258,14 +259,8 @@ def main(config):
 
 # 单独运行这个文件
 if __name__ == '__main__':
-    
-    args = argparse.ArgumentParser(description='Causality')
-    args.add_argument('-c', '--config', default=None, type=str,
-                      help='config file path (default: None)')
-    args.add_argument('-d', '--device', default=None, type=str,
-                      help='indices of GPUs to enable (default: all)')
-    args.add_argument('-t', '--task', default='fMRI', type=str,
-                        help='task (default: fMRI)')
-    config = from_args(args=args) # 根据命令行参数和自定义选项，解析配置文件并生成配置对象
-    main(config)
+    run_id = datetime.now().strftime(r'%m%d_%H%M%S') # 获得当前时间
+    config_path = 'config/config_demo.json'
+    config = read_json(Path(config_path))
+    main(config, run_id)
     torch.cuda.empty_cache() # 清理显存

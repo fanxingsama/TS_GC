@@ -38,16 +38,14 @@ def write_json(content, fname):
 
 # 根据给定的名称，初始化一个对象。
 def init_obj_by_config(config_json, name, module, *args, **kwargs):
-    module_name = config_json[name]['type']
-    module_args = dict(config_json[name]['args'])
-    assert all([k not in module_args for k in kwargs]), '不允许覆盖配置文件中给定的参数'
-    module_args.update(kwargs)
+    module_name = config_json[name]['type'] 
+    module_args = dict(config_json[name]['args']) # 加载参数
+    module_args.update(kwargs) # 更新配置文件的参数
     '''
     getattr是为了从module中获取module_name对应的对象
     (*args, **module_args)是来给getattr(module, module_name)传参的
     过程就是先得到对象，然后用参数给对象实例化
     '''
-    # ，getattr(module, module_name)相当于实例化了一个对象
     return getattr(module, module_name)(*args, **module_args)
 
 def from_args(args):
@@ -56,10 +54,6 @@ def from_args(args):
             args = argparse.Namespace(**args)
         elif not isinstance(args, tuple): # 如果args不是字典也不是元组，则使用argparse解析命令行参数
             args = args.parse_args()
-
-        if args.device is not None:
-            os.environ["CUDA_VISIBLE_DEVICES"] = args.device
-
         config = read_json(Path(args.config))
         if hasattr(args, 'name') and args.name is not None:
             config['name'] = args.name

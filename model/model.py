@@ -513,7 +513,7 @@ class PredictModel(nn.Module):
     def __init__(self, config, d_model, n_head, n_layers, ffn_hidden, drop_prob, tau):
         super().__init__()
         self.data_feature = config['data_loader']['args']
-        self.model_config = config['arch']['args']
+        self.model_config = config['model']['args']
 
         self.input_window = self.data_feature.get('time_step')
         self.output_window = self.data_feature.get('output_window')

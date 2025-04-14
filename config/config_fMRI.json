@@ -1,5 +1,5 @@
 {
-    "arch": {
+    "model": {
         "type": "PredictModel",
         "args": {
             "d_model": 256,

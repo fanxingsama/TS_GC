@@ -3,12 +3,17 @@ import logging
 import logging.config
 from pathlib import Path
 from utils import read_json
+import shutil
 import json
 from collections import OrderedDict
 
 # 设置日志的基本配置，包括创建文件等
 def setup_logging(save_dir, log_config='logger/logger_config.json', default_level=logging.INFO):
-    save_dir.mkdir(parents=True, exist_ok=True)
+    # 如果 save_dir 文件夹已存在且不为空，则删除该文件夹
+    if save_dir.exists() and any(save_dir.iterdir()):
+        shutil.rmtree(save_dir)
+        
+    save_dir.mkdir(parents=True, exist_ok=True) # 创建新的文件夹
     log_config = Path(log_config) # 加载日志配置文件
     if log_config.is_file():
         with open(log_config, 'r', encoding='utf-8') as file:
