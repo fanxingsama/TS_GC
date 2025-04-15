@@ -10,11 +10,11 @@
             "tau": 100
         }
     },
-    "gt_path":"data/fMRI/sim15_gt_processed.csv",
+    "gt_path":"data/fMRI/sim19_gt_processed.csv",
     "data_loader": {
         "type": "TimeseriesDataLoader",
         "args": {
-            "data_dir": "data/fMRI/timeseries15.csv",
+            "data_dir": "data/fMRI/timeseries19.csv",
             "batch_size": 128,
             "time_step": 32,
             "output_window": 31,

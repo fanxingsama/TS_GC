@@ -95,9 +95,9 @@ class Trainer:
             if not_improved_count > self.early_stop:
                 self.logger.info(f"一共训练了{epoch}轮，模型的最终结果：{result}")
                 break
-            # 保存检查点。
-            if epoch % 1 == 0:
-                self._save_checkpoint(epoch, save_best=best)
+            # 只在模型性能有改进时保存
+            self._save_checkpoint(epoch, save_best=best)
+    
     # 模型训练一个epoch
     def _train_epoch(self, epoch):
         self.model.train()  # 设置模型为训练模式
@@ -195,26 +195,28 @@ class Trainer:
         
         return self.valid_metrics  # 返回验证指标字典
 
-    # 保存检查点
+    # 修改后的保存检查点方法 - 只在模型性能有改进时保存
     def _save_checkpoint(self, epoch, save_best=False):
-        arch = type(self.model).__name__  # 获取模型架构名称
-        state = {  # 构建检查点状态字典，包括模型架构名称、当前轮次、模型状态字典、优化器状态字典、最佳监控指标值和配置对象。
-            'arch': arch,
-            'epoch': epoch,
-            'state_dict': self.model.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'monitor_best': self.mnt_best,
-            'config': self.config
-        }
-
-        # 构建检查点文件名，并保存检查点到文件。
-        filename = Path('saved') / self.run_id / 'model' / 'checkpoint-epoch{}.pth'.format(epoch)
-        torch.save(state, filename)
-
-        # 如果是最佳轮次，则将检查点重命名为 'model_best.pth' 并保存。
+        # 只有当save_best为True时才保存模型
         if save_best:
-            best_path = Path('saved') / self.run_id  / 'model' / 'model_best.pth'
+            arch = type(self.model).__name__
+            state = {
+                'arch': arch,
+                'epoch': epoch,
+                'state_dict': self.model.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                'monitor_best': self.mnt_best,
+                'config': self.config
+            }
+            
+            # 确保目录存在
+            save_path = Path('saved') / self.run_id / 'model'
+            save_path.mkdir(parents=True, exist_ok=True)
+            
+            # 保存最佳模型
+            best_path = save_path / 'model_best.pth'
             torch.save(state, best_path)
+            self.logger.info(f"模型性能有改进，保存最佳模型至 {best_path}")
 
 def main(config, run_id):
     log_save_path = Path('saved') / run_id / 'train_result_log'

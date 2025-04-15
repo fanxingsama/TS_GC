@@ -8,7 +8,7 @@ rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 # 读取CSV文件
-file_path = '../data/fMRI/timeseries1.csv'  # 替换为你的文件路径
+file_path = 'data/fMRI/timeseries9.csv'  # 替换为你的文件路径
 data = pd.read_csv(file_path)
 
 # 打印列名，方便用户选择
