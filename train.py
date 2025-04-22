@@ -235,7 +235,8 @@ def main(config, run_id):
     
     model = init_obj_by_config(config, 'model', module_arch, config) # 构建模型架构,最后加个config是因为model在初始化的时候需要这个参数
     train_logger.info(model) # 模型架构保存
-    train_logger.info("==============模型训练开始==============") # 打印模型架构
+    train_logger.info("==============模型训练开始==============")
+    train_logger.info(f"模型所使用数据集: {config['data_loader']['args']['data_dir']}")
     model = model.cuda() # 将模型加载到设备上
     criterion = getattr(module_metric, config['loss']) # 获取所需要使用的损失函数
     metrics = [getattr(module_metric, met) for met in config['metrics']] # 获取所需要使用的评估指标
