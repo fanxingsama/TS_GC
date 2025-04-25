@@ -112,6 +112,7 @@ try:
         
         # 调整布局，确保子图之间有足够的空间，标题和标签不重叠
         plt.tight_layout(pad=3.0)
+        plt.suptitle("多序列时序数据可视化", fontsize=16, y=1.02)
         
         # 显示图表
         plt.show()
