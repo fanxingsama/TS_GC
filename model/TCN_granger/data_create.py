@@ -3,7 +3,6 @@ from scipy.integrate import odeint
 
 # 确保VAR模型的系数是稳定的。一个稳定的VAR模型意味着其特征根的模都小于1
 def make_var_stationary(beta, radius=0.97):
-    '''Rescale coefficients of VAR model to make stable.'''
     p = beta.shape[0]
     lag = beta.shape[1] // p
     bottom = np.hstack((np.eye(p * (lag - 1)), np.zeros((p * (lag - 1), p))))

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from model.RRP_model import RegRelProp, RelProp
-from utils.util import safe_divide
+from util import safe_divide
 
 
 class Linear(nn.Linear, RegRelProp):

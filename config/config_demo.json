@@ -7,8 +7,22 @@
             "n_layers": 1,
             "ffn_hidden": 512,
             "drop_prob": 0,
-            "tau": 100
+            "tau": 100,
+            "tcn_levels": 3,        
+            "tcn_nhid": 32,          
+            "tcn_kernel_size": 3
         }
+    },
+    "type": "CausalFormerTCN", 
+    "args": {
+        "d_model": 64,
+        "nhead": 4,
+        "num_encoder_layers": 3,
+        "dim_feedforward": 128,
+        "dropout": 0.1,
+        "tcn_num_channels": [64, 64, 64], 
+        "tcn_kernel_size": 3,          
+        "tcn_dropout": 0.1              
     },
     "gt_path":"data/fMRI/sim19_gt_processed.csv",
     "data_loader": {
@@ -43,11 +57,20 @@
         }
     },
     "trainer": {
-        "epochs": 500,
-        "lam": 0
+        "epochs": 100,
+        "lam": 0,
+        "save_dir": "saved/",
+        "log_step": 50,
+        "group_lasso_lambda": 0.01, 
+        "early_stop_patience": 10,  
+        "grad_clip": 5.0        
     },
     "explainer": {
         "m": 1,
         "n": 2
+    },
+    "causality": {
+        "threshold": 0.1,                    
+        "ground_truth_path": "data/fMRI/sim19_gt_processed.csv"
     }
 }

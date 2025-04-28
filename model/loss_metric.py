@@ -43,13 +43,17 @@ def top_k_acc(output, target, k=3):
             correct += torch.sum(pred[:, i] == target).item()
     return correct / len(target)
 
+# 负对数似然损失
 def nll_loss(output, target):
-    print(output)
-    print(target)
     return F.nll_loss(output, target)
 
+# 均方误差损失
 def mse_loss(y_pred, y_true):
     return F.mse_loss(y_pred, y_true)
+
+# 交叉熵损失
+def cross_entropy_loss(output, target):
+    return F.cross_entropy(output, target)
 
 def masked_mae_loss(y_pred, y_true):
     mask = (y_true != 0).float()

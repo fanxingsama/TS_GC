@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.util import safe_divide
+from util import safe_divide
 
 
 # 在模块的前向传播中记录输入和输出，没有输入和输出无法计算相关性分数。
