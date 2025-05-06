@@ -1,27 +1,16 @@
 import torch
 import torch.nn as nn
 import math
-# 移除 RRP 相关导入
-
-# 导入 GrangerTCN 模型
-# 确保路径正确
-try:
-    # 假设 TCN 相关文件在 model/TCN_granger/
-    from model.TCN_granger.granger_tcn_model import GrangerTCN
-except ImportError:
-    # 如果在同一目录下运行脚本，可能需要不同的导入方式
-    from TCN_granger.granger_tcn_model import GrangerTCN
+from TCN_granger.granger_tcn_model import GrangerTCN
 
 
-# --- 使用标准 PyTorch 模块 ---
 Linear = nn.Linear
 LayerNorm = nn.LayerNorm
 Dropout = nn.Dropout
 Softmax = nn.Softmax
 LeakyReLU = nn.LeakyReLU
-# einsum 和 Clone 不再需要，因为 RRP 已移除
 
-# 时序嵌入 (来自原 CausalFormer, 移除 RRP 相关)
+
 class Embedding(nn.Module):
     """
     参数：
@@ -57,7 +46,7 @@ class Embedding(nn.Module):
         return embedding
         # [batch_size, series_num, d_model]
 
-# 多变量因果注意力 (来自原 CausalFormer, 移除 RRP, 修改 V 的处理方式)
+# 多变量因果注意力，实现注意力机制 计算核心 的模块。它接收已经准备好的Q/K/V，之后进行注意力计算，输出是注意力机制权重
 class MultiVariateCausalAttention(nn.Module):
     """
     Args:
@@ -87,7 +76,7 @@ class MultiVariateCausalAttention(nn.Module):
 
         # *** FIX: Replace view with reshape for non-contiguous tensor ***
         # v_reshaped = v.view(batch_size, n_head, series_num, -1)
-        v_reshaped = v.reshape(batch_size, n_head, series_num, -1) # Use reshape
+        v_reshaped = v.reshape(batch_size, n_head, series_num, -1)
 
         out_reshaped = torch.matmul(attn_weights, v_reshaped)
 
@@ -97,7 +86,7 @@ class MultiVariateCausalAttention(nn.Module):
 
         return out, attn_weights
 
-# 多头注意力 (来自原 CausalFormer, 移除 RRP, 集成 GrangerTCN)
+# 多头注意力，内部实现了多变量因果注意力，这里使用了TCN
 class MultiHeadAttention(nn.Module):
     """
     Args:
@@ -130,6 +119,7 @@ class MultiHeadAttention(nn.Module):
         self.Wq.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model)))
         self.Wk.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model)))
 
+        # V的处理
         tcn_input_size = self.series_num
         tcn_output_channels = tcn_channels[-1]
         self.tcn_processor = GrangerTCN(input_size=tcn_input_size,
@@ -141,7 +131,8 @@ class MultiHeadAttention(nn.Module):
         self.v_feature_dim = self.d_model
         self.Wv_proj = Linear(tcn_output_channels, self.series_num * self.v_feature_dim)
         self.Wv_proj.weight.data.normal_(0, math.sqrt(2.0 / (tcn_output_channels + self.series_num * self.v_feature_dim)))
-
+        
+        # 构建注意力对象
         self.attention = MultiVariateCausalAttention(self.d_tensor, self.tau)
 
         self.w_concat = Linear(in_features=self.v_feature_dim, out_features=self.feature_dim, bias=False)
@@ -208,7 +199,7 @@ class MultiHeadAttention(nn.Module):
     def get_granger_weights(self):
         return self.tcn_processor.get_first_block_conv1_weights()
 
-# 位置前馈层 (来自原 CausalFormer, 移除 RRP)
+# 位置前馈层
 class PositionwiseFeedForward(nn.Module):
     """
     Args:
@@ -232,7 +223,7 @@ class PositionwiseFeedForward(nn.Module):
         x = self.linear2(x)
         return x
 
-# 编码器层 (来自原 CausalFormer, 移除 RRP, 集成 GrangerTCN)
+# 编码器层
 class EncoderLayer(nn.Module):
     """
     Args:
@@ -281,7 +272,7 @@ class EncoderLayer(nn.Module):
     def get_granger_weights(self):
         return self.attention.get_granger_weights()
 
-# 编码器 (来自原 CausalFormer, 移除 RRP)
+# 编码器
 class Encoder(nn.Module):
     """
     Args:
@@ -332,8 +323,6 @@ class Encoder(nn.Module):
 # 最终预测模型
 class PredictModel(nn.Module):
     """
-    结合了 CausalFormer 结构和 GrangerTCN 的预测模型。
-
     Args:
         config (dict): 配置字典。
         d_model (int): QK 嵌入维度。
@@ -350,8 +339,6 @@ class PredictModel(nn.Module):
         super().__init__()
         self.config = config
         self.data_feature = config['data_loader']['args']
-        self.model_config = config['model']['args']
-
         self.input_window = self.data_feature.get('time_step')
         self.output_window = self.data_feature.get('output_window')
         self.series_num = self.data_feature.get('series_num')

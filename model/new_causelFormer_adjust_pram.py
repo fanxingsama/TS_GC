@@ -1,17 +1,14 @@
-# -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, average_precision_score, mean_squared_error
+from sklearn.metrics import roc_auc_score, average_precision_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import optuna
-import os
 import traceback
-import math # 用于初始化
 
 # --- 模型和工具函数导入 ---
 from Granger_causalFormer import PredictModel
@@ -28,31 +25,30 @@ from TCN_granger.granger_utils import (
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
-# --- 数据模拟参数 ---
-P = 5           # Number of time series (series_num)
-T = 1000        # Total time points
-LAG = 2         # True VAR lag
-SPARSITY = 0.4  # Sparsity level for GC matrix
-BETA_VALUE = 0.8# Coefficient value
-SD = 0.1        # Standard deviation of noise
-DATA_SEED = 42  # Random seed for reproducibility
-FEATURE_DIM = 1 # Assuming univariate time series for simplicity with current model structure
-OUTPUT_DIM = 1  # Assuming predicting the series value itself
+# 参数设置
+P = 5           # 时间序列的数量
+T = 1000        # 总时间点
+LAG = 2         # 真实的 VAR 滞后
+SPARSITY = 0.4  # 格兰杰因果矩阵的稀疏度
+BETA_VALUE = 0.8# 系数值
+SD = 0.1        # 噪声的标准差
+DATA_SEED = 42  # 用于可重复性的随机种子
+FEATURE_DIM = 1 # 假设当前模型结构简单，为单变量时间序列
+OUTPUT_DIM = 1  # 假设预测序列值本身
 
 # --- 训练和 Optuna 参数 ---
-EPOCHS = 50 # PGD might need more epochs
+EPOCHS = 50 
 BATCH_SIZE = 64
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-N_TRIALS = 50 # Number of Optuna trials
+N_TRIALS = 50 # Optuna 的试验次数
 STUDY_NAME = "causalformer-grangertcn-pgd-study"
 STORAGE_PATH = f"sqlite:///{STUDY_NAME}.db"
-DEFAULT_OUTPUT_WINDOW = 1 # Predict next step
+DEFAULT_OUTPUT_WINDOW = 1 # 预测下一步
 
 print(f"使用设备: {DEVICE}")
 
 # --- 1. 生成并预处理数据 ---
 print("正在生成和预处理数据...")
-# X_np shape: [T, P]
 X_np, _, GC_true_np = simulate_var(p=P, T=T, lag=LAG, sparsity=SPARSITY,
                                    beta_value=BETA_VALUE, sd=SD, seed=DATA_SEED)
 print(f"原始数据 X: {X_np.shape}")
@@ -60,14 +56,14 @@ print(f"真实格兰杰因果矩阵 GC (前{P}x{P}):\n{GC_true_np}")
 
 # 添加特征维度
 if FEATURE_DIM == 1:
-    X_np = X_np[:, :, np.newaxis] # Shape: [T, P, 1]
+    X_np = X_np[:, :, np.newaxis] # 形状: [T, P, 1]
 else:
     # 如果 FEATURE_DIM > 1, 需要相应地生成或处理数据
-    raise NotImplementedError("Data generation for FEATURE_DIM > 1 not implemented here.")
+    raise NotImplementedError("未实现 FEATURE_DIM > 1 的数据生成。")
 
 # 分割数据
 X_train_val_np, X_test_np = train_test_split(X_np, test_size=0.2, random_state=DATA_SEED, shuffle=False)
-X_train_np, X_val_np = train_test_split(X_train_val_np, test_size=0.25, random_state=DATA_SEED, shuffle=False) # 60% train, 20% val, 20% test
+X_train_np, X_val_np = train_test_split(X_train_val_np, test_size=0.25, random_state=DATA_SEED, shuffle=False) # 60% 训练集, 20% 验证集, 20% 测试集
 print(f"训练集 X: {X_train_np.shape}")
 print(f"验证集 X: {X_val_np.shape}")
 print(f"测试集 X: {X_test_np.shape}")
@@ -77,28 +73,22 @@ def create_sequences(data, input_seq_len, output_seq_len):
     """
     创建适用于 CausalFormer 的序列数据。
     Args:
-        data (np.array): 输入数据，形状 [Time, NumSeries, NumFeatures]。
-        input_seq_len (int): 输入序列长度 (input_window)。
-        output_seq_len (int): 输出序列长度 (output_window)。
+        data (np.array): 输入数据，形状 [时间步, 序列数量, 特征数量]。
+        input_seq_len (int): 输入序列长度 (输入窗口)。
+        output_seq_len (int): 输出序列长度 (输出窗口)。
     Returns:
         Tuple[np.array, np.array]: X (输入序列), Y (目标序列)
-            X shape: [num_samples, input_seq_len, NumSeries, NumFeatures]
-            Y shape: [num_samples, output_seq_len, NumSeries, NumFeatures]
+            X 形状: [样本数量, input_seq_len, 序列数量, 特征数量]
+            Y 形状: [样本数量, output_seq_len, 序列数量, 特征数量]
     """
     xs, ys = [], []
     total_len = len(data)
-    if total_len <= input_seq_len + output_seq_len -1: # 需要足够的数据点
-        print(f"警告: 数据长度 {total_len} 不足以创建长度为 input={input_seq_len}, output={output_seq_len} 的序列。")
-        return np.array(xs), np.array(ys)
 
     for i in range(total_len - input_seq_len - output_seq_len + 1):
-        x = data[i:(i + input_seq_len)]
-        y = data[(i + input_seq_len):(i + input_seq_len + output_seq_len)]
-        xs.append(x)
-        ys.append(y)
-
-    if not xs:
-        return np.array(xs), np.array(ys)
+        x = data[i:(i + input_seq_len)]  # 提取输入序列
+        y = data[(i + input_seq_len):(i + input_seq_len + output_seq_len)]  # 提取目标序列
+        xs.append(x)  # 将输入序列添加到列表 xs 中
+        ys.append(y)  # 将目标序列添加到列表 ys 中
     return np.array(xs), np.array(ys)
 
 # --- 2. 定义 Optuna 目标函数 (使用 PGD) ---
@@ -127,56 +117,54 @@ def objective(trial):
     lr = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)     # 学习率
     lambda_reg = trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True)# 正则化强度
     penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL']) # 惩罚类型
-    alpha_gsgl = 0.5 # Default for GSGL
+    alpha_gsgl = 0.5 # 默认值为 GSGL
     if penalty_type == 'GSGL':
         alpha_gsgl = trial.suggest_float('alpha_gsgl', 0.1, 0.9)
 
     print(f"\n--- Trial {trial.number} ---")
-    print(f"  CausalFormer Params: input_window={input_window}, d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
-    print(f"  GrangerTCN Params: layers={tcn_layers}, channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}")
-    print(f"  Optimization Params: lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}"
+    print(f"  CausalFormer 参数: input_window={input_window}, d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
+    print(f"  GrangerTCN 参数: layers={tcn_layers}, channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}")
+    print(f"  优化参数: lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}"
           f"{f', alpha={alpha_gsgl:.2f}' if penalty_type == 'GSGL' else ''}")
 
     # --- 数据准备 ---
     X_train_seq, y_train_seq = create_sequences(X_train_np, input_window, output_window)
     X_val_seq, y_val_seq = create_sequences(X_val_np, input_window, output_window)
 
-    if X_train_seq.size == 0 or X_val_seq.size == 0:
-        print(f"Trial {trial.number} skipped: Not enough data for sequence length {input_window}.")
-        return -1.0 # Return a bad value for maximization problem
-
+    # 转换为 PyTorch 张量
     X_train_tensor = torch.tensor(X_train_seq, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train_seq, dtype=torch.float32) # Shape: [N, T_out, P, F_out]
+    y_train_tensor = torch.tensor(y_train_seq, dtype=torch.float32) # 形状: [N, T_out, P, F_out]
     X_val_tensor = torch.tensor(X_val_seq, dtype=torch.float32)
     y_val_tensor = torch.tensor(y_val_seq, dtype=torch.float32)
 
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-    # Drop last to ensure consistent batch sizes for PGD state, could be removed if handled carefully
+    # 为了确保 PGD 状态的一致性，丢弃最后一个批次（如果处理得当可以移除）
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
     # --- 模型和损失函数 ---
     # 创建配置字典传递给 PredictModel
     config = {
-        'data_loader': {'args': {
-            'time_step': input_window,
-            'output_window': output_window,
-            'series_num': P,
-            'feature_dim': FEATURE_DIM,
-            'output_dim': OUTPUT_DIM
-        }},
-        'model': {'args': {}}, # 可以添加其他模型相关配置
+        'data_loader': {
+            'args': {
+                'time_step': input_window,
+                'output_window': output_window,
+                'series_num': P,
+                'feature_dim': FEATURE_DIM,
+                'output_dim': OUTPUT_DIM
+            }
+        },
         'device': DEVICE.type # 传递设备类型
     }
 
     model = PredictModel(config=config,
                          d_model=d_model,
                          n_head=n_head,
+                         n_layers=n_layers,
                          tcn_channels=tcn_channel_list,
                          tcn_kernel_size=tcn_kernel_size,
                          tcn_dropout=tcn_dropout,
-                         n_layers=n_layers,
                          ffn_hidden=ffn_hidden,
                          drop_prob=dropout,
                          tau=tau).to(DEVICE)
@@ -208,7 +196,7 @@ def objective(trial):
 
             # 1. 计算主损失和梯度
             model.zero_grad()
-            predictions = model(batch_x) # Shape: [B, T_out, P, F_out]
+            predictions = model(batch_x) # 形状: [B, T_out, P, F_out]
             # 确保 target 形状匹配 prediction
             main_loss = criterion(predictions, batch_y)
             main_loss.backward() # 计算所有参数的梯度
@@ -218,7 +206,7 @@ def objective(trial):
 
             # --- 手动执行 PGD 更新 ---
             with torch.no_grad():
-                # 计算当前批次的惩罚值 (用于记录)
+                # 得到Lasso惩罚值 
                 current_penalty = torch.tensor(0.0, device=DEVICE)
                 if granger_weights_param is not None:
                     current_weights = granger_weights_param.data # 获取当前权重数据
@@ -229,31 +217,26 @@ def objective(trial):
                 epoch_penalty += current_penalty.item()
 
 
-                # 更新参数
+                # 更新整个模型的参数
                 for name, param in model.named_parameters():
                     if param.grad is None: continue # 跳过没有梯度的参数
 
                     # 检查是否是需要正则化的权重
                     is_regularized_weight = (param is granger_weights_param)
 
+                    #对第一层使用近端操作符进行近端更新
                     if is_regularized_weight:
-                        # 应用 PGD 更新
-                        w_tilde = param.data - lr * param.grad # W - step * grad(L_mse)
-                        lambda_gamma = lr * lambda_reg         # step * lambda
-                        w_new = torch.zeros_like(w_tilde)      # 初始化新权重
+                        # w_tilde 形状: [out_ch, in_ch=P, kernel_size]
+                        w_tilde = param.data - lr * param.grad  # 梯度下降公式
+                        lambda_gamma = lr * lambda_reg #  是正则化参数，在近端操作中控制正则化的强度。 
+                        w_new = torch.zeros_like(w_tilde)  # 初始化新的权重张量  
 
                         if penalty_type == 'GL':
-                            # Prox for Group Lasso (Frobenius norm per input feature group)
-                            # w_tilde shape: [out_ch, in_ch=P, kernel_size]
-                            for j in range(w_tilde.shape[1]): # Iterate over input features (P)
+                            for j in range(w_tilde.shape[1]): # 遍历输入特征 (P)
                                 w_new[:, j, :] = prox_group_lasso(w_tilde[:, j, :], lambda_gamma)
                         elif penalty_type == 'GSGL':
-                            # Prox for Group Sparse Group Lasso
                             for j in range(w_tilde.shape[1]):
                                 w_new[:, j, :] = prox_group_sparse_group_lasso(w_tilde[:, j, :], lambda_gamma, alpha_gsgl)
-                        else: # Should not happen with categorical suggestion
-                            w_new = w_tilde # Fallback to gradient descent if penalty unknown
-
                         param.copy_(w_new) # 更新参数
                     else:
                         # 对其他参数执行标准梯度下降
@@ -261,7 +244,7 @@ def objective(trial):
 
         avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
         avg_epoch_penalty = epoch_penalty / num_batches if num_batches > 0 else 0
-        # print(f"  Epoch {epoch+1}/{EPOCHS}, Avg Train Loss: {avg_epoch_loss:.6f}, Avg Penalty: {avg_epoch_penalty:.6f}")
+        print(f"  Epoch {epoch+1}/{EPOCHS}, Avg Train Loss: {avg_epoch_loss:.6f}, Avg Penalty: {avg_epoch_penalty:.6f}")
 
         # --- 验证 ---
         model.eval()
@@ -285,7 +268,7 @@ def objective(trial):
             # 获取训练后的 Granger TCN 权重
             final_weights = model.get_granger_weights(layer_index=0) # 获取第一个 encoder layer 的 TCN 权重
             if final_weights is not None:
-                for j in range(P): # P is num_input_features
+                for j in range(P): # P 是输入特征的数量
                     try:
                         norm_val = torch.linalg.norm(final_weights[:, j, :].float(), ord='fro').cpu().item()
                         learned_norms[j] = norm_val if np.isfinite(norm_val) else 0.0
@@ -295,7 +278,7 @@ def objective(trial):
                 learned_norms = np.zeros(P)
 
             # --- 计算 AUROC 和 AUPR ---
-            # 真实标签: feature j 是否导致了 *任何* 其他 feature i (GC_true_np[i, j] == 1 for any i != j)
+            # 真实标签: 特征 j 是否导致了 *任何* 其他特征 i (GC_true_np[i, j] == 1 for any i != j)
             true_causes = np.array([np.any(GC_true_np[np.arange(P) != j, j] == 1) for j in range(P)], dtype=int)
             scores = learned_norms # 分数是每个输入特征的权重范数
 
@@ -319,10 +302,10 @@ def objective(trial):
         # --- Optuna 剪枝 (使用 AUROC) ---
         trial.report(final_val_auroc, epoch)
         if trial.should_prune():
-            print(f"Trial {trial.number} pruned at epoch {epoch+1}.")
-            return -1.0 # Return bad value for maximization
+            print(f"Trial {trial.number} 在第 {epoch+1} 轮被剪枝。")
+            return -1.0 # 返回一个较差的值用于最大化
 
-    print(f"Trial {trial.number} finished. Final Val AUROC: {final_val_auroc:.4f}, Final Val MSE: {final_avg_val_mse:.6f}")
+    print(f"Trial {trial.number} 完成。最终验证集 AUROC: {final_val_auroc:.4f}, 最终验证集 MSE: {final_avg_val_mse:.6f}")
     # 返回最终验证集 AUROC 给 Optuna
     return final_val_auroc if np.isfinite(final_val_auroc) else -1.0
 
@@ -344,8 +327,7 @@ except Exception as e:
     traceback.print_exc()
 
 # --- 4. 输出结果 ---
-print("\nOptuna 优化完成。")
-print(f"总尝试次数: {len(study.trials)}")
+print(f"\nOptuna 优化完成,总尝试次数: {len(study.trials)}")
 
 completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
 print(f"成功完成的 Trial 数量: {len(completed_trials)}")
@@ -367,10 +349,9 @@ if completed_trials:
 else:
     print("没有找到完成的 Trial。")
 
-# --- 5. 可视化优化过程 ---
+# --- 5. Matplotlib可视化优化过程 ---
 if completed_trials:
     try:
-        # --- 使用 Matplotlib 绘制优化历史 ---
         trial_numbers = [t.number for t in completed_trials]
         auroc_values = [t.value for t in completed_trials if t.value is not None] # 过滤掉 None 值
         # 确保 trial_numbers 和 auroc_values 长度匹配
@@ -401,7 +382,6 @@ if completed_trials:
         traceback.print_exc() # 打印详细错误
 else:
      print("没有完成的 Trial 可供可视化。")
-
 
 # # --- 6. (可选) 使用最佳参数在完整训练集上训练并评估测试集 ---
 # if best_params is not None:
