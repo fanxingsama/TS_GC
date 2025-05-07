@@ -7,12 +7,12 @@ import numpy as np
 from datetime import datetime
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, average_precision_score
-from tqdm import tqdm
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import rcParams
 import optuna
 from Granger_causalFormer import PredictModel
+from data_loader import TimeSeriesDataloader
 
 from TCN_granger.granger_utils import (
     prox_group_lasso,
@@ -33,12 +33,13 @@ SPARSITY = 0.4  # 格兰杰因果矩阵的稀疏度
 BETA_VALUE = 0.8# 系数值
 SD = 0.1        # 噪声的标准差
 DATA_SEED = 42  # 用于可重复性的随机种子
-FEATURE_DIM = 1 # 假设当前模型结构简单，为单变量时间序列
-OUTPUT_DIM = 1  # 假设预测序列值本身
+INPUT_WINDOW = 20 # 输入序列长度 (输入窗口)
+FEATURE_DIM = 1 # 每个时间序列在每个时间点上的特征数量
+OUTPUT_DIM = 1  # 每个时间序列在每个预测时间步上输出的目标数量
+OUTPUT_WINDOW = 1 # 预测下一个时间步
 
 # --- 训练和 Optuna 参数 ---
 EPOCHS = 50
-DATA_SEED = 42  # 用于可重复性的随机种子 (主要用于数据分割)
 BATCH_SIZE = 64
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 N_TRIALS = 50 # Optuna 的试验次数
@@ -53,69 +54,19 @@ STORAGE_PATH = f"sqlite:///{STUDY_NAME}.db"
 # --- 1. 得到数据并预处理 ---
 data_path = '../data/fMRI/timeseries9.csv'
 true_gc_path = '../data/fMRI/sim9_gt_processed.csv'
-df_a = pd.read_csv(data_path)
-df_b = pd.read_csv(true_gc_path, header=None) # 读取真实的格兰杰因果矩阵
-series_names = df_a.columns.tolist() # 获取序列名称
-P = len(series_names) # 获取序列数量
-X_np = df_a.values  # 获取所有的数据点
-T = X_np.shape[0]   # 获取时间点数量 T
-series_to_idx = {name: i for i, name in enumerate(series_names)} # 创建从序列名称到索引的映射
 
-GC_true_np = np.zeros((P, P), dtype=int) # 初始化真实的格兰杰因果矩阵
-# 读取真实的格兰杰因果矩阵
-for _, row in df_b.iterrows():
-    # 修改点：使用 .iloc 按位置访问 Series 中的元素
-    cause_name = row.iloc[0]  # 第一列为 "因"
-    effect_name = row.iloc[1] # 第二列为 "果"
-    # lag_value = row.iloc[2] if df_b.shape[1] > 2 else None # 第三列为 "延迟" (可选)
-    str_cause_name = str(cause_name)
-    str_effect_name = str(effect_name)
-
-    if str_cause_name in series_to_idx and str_effect_name in series_to_idx:
-        idx_cause = series_to_idx[str_cause_name]
-        idx_effect = series_to_idx[str_effect_name]
-        GC_true_np[idx_effect, idx_cause] = 1
-
-print(f"真实的格兰杰因果矩阵 GC_true_np (形状 {GC_true_np.shape}):\n{GC_true_np}")
-
-X_np = X_np[:, :, np.newaxis] # 形状: [T, P, 1]
-
-# 分割数据
-X_train_val_np, X_test_np = train_test_split(X_np, test_size=0.2, random_state=DATA_SEED, shuffle=False)
-X_train_np, X_val_np = train_test_split(X_train_val_np, test_size=0.25, random_state=DATA_SEED, shuffle=False)
-print(f"训练集 X_train_np: {X_train_np.shape}")
-print(f"验证集 X_val_np: {X_val_np.shape}")
-print(f"测试集 X_test_np: {X_test_np.shape}")
-
-# --- 辅助函数：创建序列 (适配 CausalFormer 输入输出) ---
-def create_sequences(data, input_seq_len, output_seq_len):
-    """
-    创建适用于 CausalFormer 的序列数据。
-    Args:
-        data (np.array): 输入数据，形状 [时间步, 序列数量, 特征数量]。
-        input_seq_len (int): 输入序列长度 (输入窗口)。
-        output_seq_len (int): 输出序列长度 (输出窗口)。
-    Returns:
-        Tuple[np.array, np.array]: X (输入序列), Y (目标序列)
-            X 形状: [样本数量, input_seq_len, 序列数量, 特征数量]
-            Y 形状: [样本数量, output_seq_len, 序列数量, 特征数量]
-    """
-    xs, ys = [], []
-    total_len = len(data)
-
-    for i in range(total_len - input_seq_len - output_seq_len + 1):
-        x = data[i:(i + input_seq_len)]  # 提取输入序列
-        y = data[(i + input_seq_len):(i + input_seq_len + output_seq_len)]  # 提取目标序列
-        xs.append(x)  # 将输入序列添加到列表 xs 中
-        ys.append(y)  # 将目标序列添加到列表 ys 中
-    return np.array(xs), np.array(ys)
-
+timeseriesDataLoader = TimeSeriesDataloader(data_dir=data_path, gc_dir=true_gc_path, batch_size=BATCH_SIZE, 
+                                            DATA_SEED=DATA_SEED, input_window=INPUT_WINDOW, output_window=OUTPUT_WINDOW, shuffle=True)
+GC_true_np = timeseriesDataLoader.get_true_granger() # 得到真实的格兰杰因果矩阵
+train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
+series_num = timeseriesDataLoader.series_num # 获取序列数量
 # --- 2. 定义 Optuna 目标函数 ---
 def objective(trial):
-    global X_train_np, X_val_np, GC_true_np, P, FEATURE_DIM, OUTPUT_DIM
+    global GC_true_np,  FEATURE_DIM, OUTPUT_DIM
+    
     # CausalFormer 参数
-    input_window = trial.suggest_categorical('input_window', [10, 20, 30]) # 输入序列长度
-    output_window = 1 # 固定预测下一步
+    input_window = INPUT_WINDOW # 输入序列长度
+    output_window = OUTPUT_WINDOW # 固定预测下一步
     d_model = trial.suggest_categorical('d_model', [32, 64, 128])       # QK 嵌入维度
     n_head = trial.suggest_categorical('n_head', [2, 4, 8])             # 注意力头数
     n_layers = trial.suggest_int('n_layers', 1, 3)                      # Encoder 层数
@@ -144,33 +95,16 @@ def objective(trial):
     print(f"  优化参数: lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}"
           f"{f', alpha={alpha_gsgl:.2f}' if penalty_type == 'GSGL' else ''}")
 
-    # --- 数据准备 ---
-    X_train_seq, y_train_seq = create_sequences(X_train_np, input_window, output_window)
-    X_val_seq, y_val_seq = create_sequences(X_val_np, input_window, output_window)
-
-    # 转换为 PyTorch 张量
-    X_train_tensor = torch.tensor(X_train_seq, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train_seq, dtype=torch.float32) # 形状: [N, T_out, P, F_out]
-    X_val_tensor = torch.tensor(X_val_seq, dtype=torch.float32)
-    y_val_tensor = torch.tensor(y_val_seq, dtype=torch.float32)
-
-    train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-    val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-    
-    # 为了确保 PGD 状态的一致性，丢弃最后一个批次（如果处理得当可以移除）
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
     # --- 模型和损失函数 ---
     # 创建配置字典传递给 PredictModel
     config = {
         'data_loader': {
             'args': {
-                'time_step': input_window,
-                'output_window': output_window,
-                'series_num': P,
+                'input_window': INPUT_WINDOW,
+                'output_window': OUTPUT_WINDOW,
                 'feature_dim': FEATURE_DIM,
-                'output_dim': OUTPUT_DIM
+                'output_dim': OUTPUT_DIM,
+                'series_num': series_num
             }
         },
         'device': DEVICE.type # 传递设备类型
@@ -198,7 +132,7 @@ def objective(trial):
 
     # --- 训练循环 ---
     for epoch in range(EPOCHS):
-        model.train()
+        model.train() # 设置模型为训练模式
         epoch_loss = 0.0
         epoch_penalty = 0.0
         num_batches = 0
@@ -216,9 +150,8 @@ def objective(trial):
             epoch_loss += main_loss.item()
             num_batches += 1
 
-            # --- 手动执行 PGD 更新 ---
+            # --- 手动执行近端梯度下降更新 ---
             with torch.no_grad():
-                # 得到Lasso惩罚值
                 current_penalty = torch.tensor(0.0, device=DEVICE)
                 current_weights = granger_weights_param.data # 获取当前权重数据
                 if penalty_type == 'GL':
@@ -241,7 +174,7 @@ def objective(trial):
                         w_new = torch.zeros_like(w_tilde)  # 初始化新的权重张量
 
                         if penalty_type == 'GL':
-                            for j in range(w_tilde.shape[1]): # 遍历输入特征 (P)
+                            for j in range(w_tilde.shape[1]): # 遍历输入特征
                                 w_new[:, j, :] = prox_group_lasso(w_tilde[:, j, :], lambda_gamma)
                         elif penalty_type == 'GSGL':
                             for j in range(w_tilde.shape[1]):
@@ -258,7 +191,7 @@ def objective(trial):
         # --- 验证 ---
         model.eval()
         val_mse = 0.0 # 累计验证集的均方误差
-        learned_norms = np.zeros(P) # 每个输入特征的范数
+        learned_norms = np.zeros(series_num) # 每个输入特征的范数
         current_val_auroc = 0.0 # 验证集的 AUROC
         current_val_aupr = 0.0 # 验证集的 AUPR
 
@@ -274,23 +207,22 @@ def objective(trial):
             # 获取训练后的 Granger TCN 权重
             final_weights = model.get_granger_weights(layer_index=0) # 获取第一个 encoder layer 的 TCN 权重
             if final_weights is not None:
-                for j in range(P): # 计算每个输入特征的权重范数（Frobenius 范数）
+                for j in range(series_num): # 计算每个输入特征的权重范数（Frobenius 范数）
                     norm_val = torch.linalg.norm(final_weights[:, j, :].float(), ord='fro').cpu().item()
                     learned_norms[j] = norm_val if np.isfinite(norm_val) else 0.0
             else:
-                learned_norms = np.zeros(P)
+                learned_norms = np.zeros(series_num)
 
             # --- 计算 AUROC 和 AUPR (仅供参考) ---
-            if GC_true_np.shape[0] == P and P > 0 : # Ensure GC_true_np is valid
-                true_causes = np.array([np.any(GC_true_np[np.arange(P) != j, j] == 1) for j in range(P)], dtype=int) # 一个布尔数组，表示每个输入特征是否是其他特征的因果因素
+            if GC_true_np.shape[0] == series_num and series_num > 0 : # Ensure GC_true_np is valid
+                true_causes = np.array([np.any(GC_true_np[np.arange(series_num) != j, j] == 1) for j in range(series_num)], dtype=int) # 一个布尔数组，表示每个输入特征是否是其他特征的因果因素
                 scores = learned_norms # 分数是每个输入特征的权重范数
                 valid_indices = ~np.isnan(scores) & ~np.isinf(scores) # 权重矩阵只要有值，就是True
-
                 if len(np.unique(true_causes[valid_indices])) > 1 and len(scores[valid_indices]) > 1:
                     try:
                         current_val_auroc = roc_auc_score(true_causes[valid_indices], scores[valid_indices])
                         current_val_aupr = average_precision_score(true_causes[valid_indices], scores[valid_indices])
-                    except ValueError: # Handle cases where AUROC/AUPR cannot be computed
+                    except ValueError:
                         current_val_auroc = 0.0
                         current_val_aupr = 0.0
                 else:

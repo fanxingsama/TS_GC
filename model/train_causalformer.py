@@ -1,211 +1,407 @@
+import argparse
+import json
+import os
 import torch
-import torch.nn as nn
-from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
-from sklearn.metrics import roc_auc_score, average_precision_score
-import traceback
+import pandas as pd
 
-# 根据你的项目结构调整导入路径
-# 假设此文件位于 model/training/
-from Granger_causalFormer import PredictModel
-from TCN_granger.granger_utils import (
-    prox_group_lasso,
-    prox_group_sparse_group_lasso,
-    calculate_group_lasso_penalty,
-    calculate_group_sparse_group_lasso_penalty
-)
+# 根据您的项目结构以及运行脚本的方式调整导入。
+# 如果从 causalFormer/ 目录运行 `python model/train_causalFormer.py`，
+# 并且 causalFormer/ 在 PYTHONPATH 中，或者您通过 sys.path 添加它。
+# 这些导入假设 `causalFormer` 是顶级包。
+from causalFormer.logger.logger import get_logger # 确保此路径正确
+from causalFormer.data_loaders import data_provider
+from causalFormer.model.Granger_causalFormer import GrangerCausalFormer
+import causalFormer.model.loss_metric as module_loss
+import causalFormer.model.loss_metric as module_metric
 
-def train_and_evaluate(params, config, train_loader, val_loader, gc_true_np, device, epochs):
+import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
+
+# 默认随机种子
+SEED = 123
+torch.manual_seed(SEED)
+np.random.seed(SEED)
+# torch.backends.cudnn.deterministic = True # 可能会降低速度，如果需要则启用
+# torch.backends.cudnn.benchmark = False   # 如果输入大小不变则启用
+
+class CausalFormerTrainer:
     """
-    Returns:
-        tuple: (final_val_auroc, final_avg_val_mse)
-               final_val_auroc (float): 最后一轮后验证集上的 AUROC。
-               final_avg_val_mse (float): 最后一轮后验证集上的平均 MSE。
-               如果发生错误，则返回 (-1.0, float('inf'))。
+    负责CausalFormer模型训练、验证、测试和因果矩阵生成的类。
     """
-    try:
-        d_model = params['d_model']
-        n_head = params['n_head']
-        n_layers = params['n_layers']
-        tcn_channels = params['tcn_channels']
-        tcn_kernel_size = params['tcn_kernel_size']
-        tcn_dropout = params['tcn_dropout']
-        tcn_layers = params['tcn_layers']
-        ffn_hidden = params['ffn_hidden']
-        dropout = params['dropout']
-        tau = params['tau']
-        lr = params['learning_rate']
-        lambda_reg = params['lambda_reg']
-        penalty_type = params['penalty_type']
-        alpha_gsgl = params.get('alpha_gsgl', 0.5) # 如果不是 GSGL，则使用默认值
+    def __init__(self, model, criterion, metrics_fns, optimizer, config, device,
+                 train_loader, valid_loader, test_loader, n_series,
+                 lr_scheduler=None, logger=None):
+        self.model = model
+        self.criterion = criterion
+        self.metrics_fns = metrics_fns
+        self.optimizer = optimizer
+        self.config = config
+        self.device = device
+        self.train_loader = train_loader
+        self.valid_loader = valid_loader
+        self.test_loader = test_loader
+        self.lr_scheduler = lr_scheduler
+        self.logger = logger or get_logger(config.get('name', 'CausalFormer_Trainer_Default')) # 提供一个默认记录器
 
-        tcn_channel_list = [tcn_channels] * tcn_layers
-        P = config['data_loader']['args']['series_num'] # 获取序列数量
+        # 从配置中提取训练参数
+        trainer_conf = self.config['trainer']
+        self.epochs = trainer_conf['epochs']
+        self.save_dir = trainer_conf['save_dir']
+        self.monitor_mode = trainer_conf.get('monitor_mode', 'min')
+        self.monitor_metric_name = trainer_conf.get('monitor_metric', 'val_loss') # 假设监控验证损失
+        self.save_period = trainer_conf.get('save_period')
+        self.early_stop = trainer_conf.get('early_stop', float('inf'))
+        self.grad_norm_clip = trainer_conf.get('grad_norm_clip', 1.0)
 
-        # --- 模型设置 ---
-        model = PredictModel(config=config,
-                             d_model=d_model,
-                             n_head=n_head,
-                             n_layers=n_layers,
-                             tcn_channels=tcn_channel_list,
-                             tcn_kernel_size=tcn_kernel_size,
-                             tcn_dropout=tcn_dropout,
-                             ffn_hidden=ffn_hidden,
-                             drop_prob=dropout,
-                             tau=tau).to(device)
+        self.best_val_metric = float('inf' if self.monitor_mode == 'min' else '-inf')
+        self.epochs_no_improve = 0
+        
+        os.makedirs(self.save_dir, exist_ok=True)
+        self.logger.info(f"模型将保存在: {self.save_dir}")
 
-        criterion = nn.MSELoss()
+        # 从数据加载器配置中提取序列长度信息
+        dl_conf = self.config['data_loader']['args']
+        self.seq_len = dl_conf['size'][0]
+        self.label_len = dl_conf['size'][1] # 解码器的起始标记长度
+        self.pred_len = dl_conf['size'][2] # 预测范围
 
-        # --- 近端优化设置 ---
-        granger_weights_param = None
-        try:
-            # 定位用于正则化的权重
-            granger_weights_param = model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
-            print("  成功定位 Granger TCN 权重进行正则化。")
-        except AttributeError:
-            print("  警告：无法定位 Granger TCN 权重。将不应用稀疏惩罚。")
+        self.n_series = n_series # 从外部传入，因为数据加载器创建后才知道
+        self.model_args = self.config['arch']['args'] # 保存模型参数以备后用
 
-        # --- 训练循环 ---
-        final_val_auroc = -1.0
-        final_avg_val_mse = float('inf')
+    def _train_epoch(self, epoch):
+        """
+        执行一个训练轮次。
+        :param epoch: 当前轮次编号
+        :return: 平均训练损失和训练指标字典
+        """
+        self.model.train()
+        total_train_loss = 0
+        train_metrics_agg = {m.__name__: 0.0 for m in self.metrics_fns}
 
-        for epoch in range(epochs):
-            model.train()
-            epoch_loss = 0.0
-            epoch_penalty = 0.0
-            num_batches = 0
+        for batch_idx, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(self.train_loader):
+            batch_x = batch_x.float().to(self.device)
+            batch_y = batch_y.float().to(self.device)
+            
+            dec_inp_label_part = batch_y[:, :self.label_len, :]
+            dec_inp_pred_part = torch.zeros_like(batch_y[:, self.label_len:(self.label_len + self.pred_len), :]).float()
+            dec_inp = torch.cat([dec_inp_label_part, dec_inp_pred_part], dim=1).float().to(self.device)
 
-            for batch_x, batch_y in train_loader:
-                batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+            self.optimizer.zero_grad()
+            
+            if self.model_args.get('output_attention', False):
+                outputs, attention = self.model(batch_x, dec_inp) 
+            else:
+                outputs = self.model(batch_x, dec_inp)
 
-                # 1. 计算主损失和梯度
-                model.zero_grad()
-                predictions = model(batch_x)
-                main_loss = criterion(predictions, batch_y)
-                main_loss.backward() # 计算所有参数的梯度
+            targets = batch_y[:, self.label_len:(self.label_len + self.pred_len), :].to(self.device)
+            
+            if outputs.shape != targets.shape:
+                self.logger.warning(f"训练中形状不匹配！输出: {outputs.shape}, 目标: {targets.shape}。")
+                # outputs = outputs[:, -self.pred_len:, :] # 调整逻辑可能需要根据模型具体行为
 
-                epoch_loss += main_loss.item()
-                num_batches += 1
+            loss = self.criterion(outputs, targets)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_norm_clip)
+            self.optimizer.step()
 
-                # --- 手动 PGD 更新 ---
-                with torch.no_grad():
-                    current_penalty = torch.tensor(0.0, device=device)
-                    if granger_weights_param is not None:
-                        current_weights = granger_weights_param.data
-                        if penalty_type == 'GL':
-                            current_penalty = calculate_group_lasso_penalty(current_weights, lambda_reg)
-                        elif penalty_type == 'GSGL':
-                            current_penalty = calculate_group_sparse_group_lasso_penalty(current_weights, lambda_reg, alpha_gsgl)
-                    epoch_penalty += current_penalty.item()
+            total_train_loss += loss.item()
+            for met_fn in self.metrics_fns:
+                train_metrics_agg[met_fn.__name__] += met_fn(outputs.detach(), targets.detach()).item() * batch_x.size(0)
+        
+        avg_train_loss = total_train_loss / len(self.train_loader)
+        for name in train_metrics_agg:
+            train_metrics_agg[name] /= len(self.train_loader.dataset)
+            
+        return avg_train_loss, train_metrics_agg
 
-                    # 更新参数
-                    for name, param in model.named_parameters():
-                        if param.grad is None: continue
-
-                        is_regularized_weight = (param is granger_weights_param)
-
-                        if is_regularized_weight:
-                            # 对正则化权重应用近端算子
-                            w_tilde = param.data - lr * param.grad
-                            lambda_gamma = lr * lambda_reg
-                            w_new = torch.zeros_like(w_tilde)
-
-                            if penalty_type == 'GL':
-                                for j in range(w_tilde.shape[1]): # 遍历输入特征 (P)
-                                    w_new[:, j, :] = prox_group_lasso(w_tilde[:, j, :], lambda_gamma)
-                            elif penalty_type == 'GSGL':
-                                for j in range(w_tilde.shape[1]):
-                                    w_new[:, j, :] = prox_group_sparse_group_lasso(w_tilde[:, j, :], lambda_gamma, alpha_gsgl)
-                            param.copy_(w_new) # 更新参数
-                        else:
-                            # 对其他参数进行标准梯度下降
-                            param.copy_(param.data - lr * param.grad)
-
-            avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
-            avg_epoch_penalty = epoch_penalty / num_batches if num_batches > 0 else 0
-            # 可选：减少打印频率或在 Optuna 运行时移除
-            if (epoch + 1) % 10 == 0 or epoch == epochs - 1:
-                 print(f"    轮次 {epoch+1}/{epochs}, 平均训练损失: {avg_epoch_loss:.6f}, 平均惩罚项: {avg_epoch_penalty:.6f}")
-
-        # --- 验证 (在最后一轮之后) ---
-        model.eval()
-        val_mse = 0.0
-        learned_norms = np.zeros(P)
-        current_val_auroc = 0.0
-        current_val_aupr = 0.0
-
+    def _valid_epoch(self, epoch):
+        """
+        执行一个验证轮次。
+        :param epoch: 当前轮次编号
+        :return: 平均验证损失和验证指标字典
+        """
+        self.model.eval()
+        total_val_loss = 0
+        val_metrics_agg = {m.__name__: 0.0 for m in self.metrics_fns}
         with torch.no_grad():
-            for batch_x, batch_y in val_loader:
-                batch_x, batch_y = batch_x.to(device), batch_y.to(device)
-                predictions = model(batch_x)
-                loss = criterion(predictions, batch_y)
-                val_mse += loss.item() * batch_x.size(0)
+            for batch_idx, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(self.valid_loader):
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)
+                
+                dec_inp_label_part = batch_y[:, :self.label_len, :]
+                dec_inp_pred_part = torch.zeros_like(batch_y[:, self.label_len:(self.label_len + self.pred_len), :]).float()
+                dec_inp = torch.cat([dec_inp_label_part, dec_inp_pred_part], dim=1).float().to(self.device)
 
-            if len(val_loader.dataset) > 0:
-                final_avg_val_mse = val_mse / len(val_loader.dataset)
+                if self.model_args.get('output_attention', False):
+                    outputs, attention = self.model(batch_x, dec_inp)
+                else:
+                    outputs = self.model(batch_x, dec_inp)
+                
+                targets = batch_y[:, self.label_len:(self.label_len + self.pred_len), :].to(self.device)
+
+                if outputs.shape != targets.shape:
+                    self.logger.warning(f"验证中形状不匹配！输出: {outputs.shape}, 目标: {targets.shape}。")
+                    # outputs = outputs[:, -self.pred_len:, :]
+
+                loss = self.criterion(outputs, targets)
+                total_val_loss += loss.item()
+                for met_fn in self.metrics_fns:
+                    val_metrics_agg[met_fn.__name__] += met_fn(outputs, targets).item() * batch_x.size(0)
+        
+        avg_val_loss = total_val_loss / len(self.valid_loader)
+        for name in val_metrics_agg:
+            val_metrics_agg[name] /= len(self.valid_loader.dataset)
+            
+        return avg_val_loss, val_metrics_agg
+
+    def train(self):
+        """
+        执行完整的训练过程。
+        """
+        for epoch in range(1, self.epochs + 1):
+            avg_train_loss, train_metrics = self._train_epoch(epoch)
+            
+            log_msg = f"轮次 {epoch}/{self.epochs} - 训练损失: {avg_train_loss:.4f}"
+            for name, val in train_metrics.items():
+                log_msg += f" - 训练 {name}: {val:.4f}"
+            self.logger.info(log_msg)
+
+            avg_val_loss, val_metrics = self._valid_epoch(epoch)
+            log_msg_val = f"轮次 {epoch}/{self.epochs} - 验证损失: {avg_val_loss:.4f}"
+            for name, val in val_metrics.items():
+                log_msg_val += f" - 验证 {name}: {val:.4f}"
+            self.logger.info(log_msg_val)
+
+            if self.lr_scheduler:
+                if isinstance(self.lr_scheduler, lr_scheduler.ReduceLROnPlateau):
+                    # 根据配置决定监控哪个指标
+                    metric_to_monitor = avg_val_loss # 默认
+                    if self.monitor_metric_name != 'val_loss' and self.monitor_metric_name in val_metrics:
+                        metric_to_monitor = val_metrics[self.monitor_metric_name]
+                    self.lr_scheduler.step(metric_to_monitor)
+                else:
+                    self.lr_scheduler.step()
+
+            # 确定当前轮次的监控指标值
+            current_monitored_val = avg_val_loss # 默认
+            if self.monitor_metric_name != 'val_loss' and self.monitor_metric_name in val_metrics:
+                current_monitored_val = val_metrics[self.monitor_metric_name]
+            
+            improved = (self.monitor_mode == 'min' and current_monitored_val < self.best_val_metric) or \
+                       (self.monitor_mode == 'max' and current_monitored_val > self.best_val_metric)
+
+            if improved:
+                self.best_val_metric = current_monitored_val
+                self.epochs_no_improve = 0
+                model_save_path = os.path.join(self.save_dir, "best_model.pth")
+                torch.save(self.model.state_dict(), model_save_path)
+                self.logger.info(f"保存最佳模型到 {model_save_path} (监控指标 {self.monitor_metric_name}: {self.best_val_metric:.4f})")
             else:
-                final_avg_val_mse = float('inf')
+                self.epochs_no_improve += 1
 
-            # 获取最终权重用于 AUROC/AUPR 计算
-            final_weights = model.get_granger_weights(layer_index=0)
-            if final_weights is not None:
-                for j in range(P):
-                    try:
-                        norm_val = torch.linalg.norm(final_weights[:, j, :].float(), ord='fro').cpu().item()
-                        learned_norms[j] = norm_val if np.isfinite(norm_val) else 0.0
-                    except Exception as e_norm:
-                        learned_norms[j] = 0.0
+            if self.save_period and epoch % self.save_period == 0:
+                model_save_path = os.path.join(self.save_dir, f"checkpoint_epoch{epoch}.pth")
+                torch.save(self.model.state_dict(), model_save_path)
+                self.logger.info(f"保存检查点到 {model_save_path}")
+
+            if self.epochs_no_improve >= self.early_stop:
+                self.logger.info(f"在 {self.epochs_no_improve} 个轮次没有改进后触发早停。")
+                break
+        
+        self._test()
+        self._generate_causality_matrix()
+        self.logger.info("训练和评估完成。")
+
+    def _test(self):
+        """
+        在测试集上评估最佳模型。
+        """
+        self.logger.info("加载最佳模型以在测试集上进行最终评估...")
+        best_model_path = os.path.join(self.save_dir, "best_model.pth")
+        if os.path.exists(best_model_path):
+            self.model.load_state_dict(torch.load(best_model_path, map_location=self.device))
+        else:
+            self.logger.warning("未找到 best_model.pth。使用最后一个模型状态进行测试。")
+
+        self.model.eval()
+        total_test_loss = 0
+        test_metrics_agg = {m.__name__: 0.0 for m in self.metrics_fns}
+        with torch.no_grad():
+            for batch_idx, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(self.test_loader):
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)
+
+                dec_inp_label_part = batch_y[:, :self.label_len, :]
+                dec_inp_pred_part = torch.zeros_like(batch_y[:, self.label_len:(self.label_len + self.pred_len), :]).float()
+                dec_inp = torch.cat([dec_inp_label_part, dec_inp_pred_part], dim=1).float().to(self.device)
+                
+                if self.model_args.get('output_attention', False):
+                    outputs, attention = self.model(batch_x, dec_inp)
+                else:
+                    outputs = self.model(batch_x, dec_inp)
+
+                targets = batch_y[:, self.label_len:(self.label_len + self.pred_len), :].to(self.device)
+                
+                if outputs.shape != targets.shape:
+                    self.logger.warning(f"测试中形状不匹配！输出: {outputs.shape}, 目标: {targets.shape}。")
+                    # outputs = outputs[:, -self.pred_len:, :]
+
+                loss = self.criterion(outputs, targets)
+                total_test_loss += loss.item()
+                for met_fn in self.metrics_fns:
+                   test_metrics_agg[met_fn.__name__] += met_fn(outputs, targets).item() * batch_x.size(0)
+
+        avg_test_loss = total_test_loss / len(self.test_loader)
+        log_msg_test = f"测试结果 - 损失: {avg_test_loss:.4f}"
+        for name, val in test_metrics_agg.items():
+            test_metrics_agg[name] /= len(self.test_loader.dataset)
+            log_msg_test += f" - {name}: {test_metrics_agg[name]:.4f}"
+        self.logger.info(log_msg_test)
+
+    def _generate_causality_matrix(self):
+        """
+        计算并保存格兰杰因果关系矩阵。
+        """
+        self.logger.info("正在计算格兰杰因果关系矩阵...")
+        significance_level = self.config.get('causality_params', {}).get('significance_level', 0.05)
+        
+        causal_matrix = self.model.get_granger_causality_matrix(significance_level=significance_level)
+        
+        if causal_matrix is not None:
+            if isinstance(causal_matrix, torch.Tensor):
+                causal_matrix_np = causal_matrix.detach().cpu().numpy()
             else:
-                learned_norms = np.zeros(P)
+                causal_matrix_np = causal_matrix
+                
+            causal_matrix_path_npy = os.path.join(self.save_dir, "granger_causality_matrix.npy")
+            np.save(causal_matrix_path_npy, causal_matrix_np)
+            self.logger.info(f"格兰杰因果关系矩阵 (NumPy 数组) 已保存到 {causal_matrix_path_npy}")
 
-            # --- 计算 AUROC 和 AUPR ---
-            true_causes = np.array([np.any(gc_true_np[np.arange(P) != j, j] == 1) for j in range(P)], dtype=int)
-            scores = learned_norms
-
-            if len(np.unique(true_causes)) > 1 and not np.all(np.isnan(scores)) and len(np.unique(scores)) > 1:
+            if len(causal_matrix_np.shape) == 2 and causal_matrix_np.shape[0] == self.n_series and causal_matrix_np.shape[1] == self.n_series:
                 try:
-                    valid_indices = ~np.isnan(scores)
-                    if np.any(valid_indices):
-                        current_val_auroc = roc_auc_score(true_causes[valid_indices], scores[valid_indices])
-                        current_val_aupr = average_precision_score(true_causes[valid_indices], scores[valid_indices])
-                    else:
-                        current_val_auroc, current_val_aupr = 0.0, 0.0
-                except ValueError as e_auc:
-                    current_val_auroc, current_val_aupr = 0.0, 0.0
+                    series_names = getattr(self.train_loader.dataset, 'feature_names', [f'series_{i}' for i in range(self.n_series)])
+                    if len(series_names) != self.n_series:
+                        series_names = [f'series_{i}' for i in range(self.n_series)]
+
+                    df_causal_matrix = pd.DataFrame(causal_matrix_np, index=series_names, columns=series_names)
+                    causal_matrix_path_csv = os.path.join(self.save_dir, "granger_causality_matrix.csv")
+                    df_causal_matrix.to_csv(causal_matrix_path_csv)
+                    self.logger.info(f"格兰杰因果关系矩阵也已另存为 CSV 到 {causal_matrix_path_csv}")
+                except Exception as e:
+                    self.logger.error(f"无法将格兰杰因果关系矩阵另存为 CSV: {e}")
+            elif len(causal_matrix_np.shape) != 2:
+                 self.logger.warning(f"格兰杰因果关系矩阵不是二维的 (形状: {causal_matrix_np.shape})，无法直接另存为 N,N CSV。")
             else:
-                current_val_auroc, current_val_aupr = 0.0, 0.0
+                self.logger.warning(f"格兰杰因果关系矩阵是二维的，但形状 {causal_matrix_np.shape} 与 (N={self.n_series}, N={self.n_series}) 不匹配。不另存为 CSV。")
+        else:
+            self.logger.warning("格兰杰因果关系矩阵无法计算或模型返回为 None。")
 
-        final_val_auroc = current_val_auroc if np.isfinite(current_val_auroc) else -1.0
 
-        print(f"  训练完成。最终验证集 AUROC: {final_val_auroc:.4f}, 最终验证集 MSE: {final_avg_val_mse:.6f}")
-        return final_val_auroc, final_avg_val_mse
+def main(config):
+    # 设置记录器
+    run_name = config.get('name', 'CausalFormer_Run')
+    logger = get_logger(run_name)
+    logger.info(f"开始运行: {run_name}")
+    logger.info(f"配置: {json.dumps(config, indent=2, ensure_ascii=False)}") # ensure_ascii=False 用于正确显示中文
 
-    except Exception as e:
-        print(f"训练/评估过程中出错: {e}")
-        traceback.print_exc()
-        return -1.0, float('inf') # 指示失败
+    # 设置设备
+    use_cuda = config.get('n_gpu', 0) > 0 and torch.cuda.is_available()
+    if use_cuda:
+        device = torch.device("cuda")
+        logger.info(f"使用 GPU: {torch.cuda.get_device_name(0)}")
+        if config.get('n_gpu', 0) > torch.cuda.device_count():
+            logger.warning(f"警告: n_gpu ({config.get('n_gpu',0)}) 大于可用 GPU 数量 ({torch.cuda.device_count()})")
+    else:
+        device = torch.device("cpu")
+        logger.info("使用 CPU")
 
-# 辅助函数：创建序列 (移到此处以封装)
-def create_sequences(data, input_seq_len, output_seq_len):
-    """
-    为时间序列预测创建序列。
-    Args:
-        data (np.array): 输入数据，形状 [时间步, 序列数, 特征数]。
-        input_seq_len (int): 输入窗口长度。
-        output_seq_len (int): 输出窗口长度。
-    Returns:
-        Tuple[np.array, np.array]: X (输入), Y (目标)
-            X 形状: [样本数, input_seq_len, 序列数, 特征数]
-            Y 形状: [样本数, output_seq_len, 序列数, 特征数]
-    """
-    xs, ys = [], []
-    total_len = len(data)
-    for i in range(total_len - input_seq_len - output_seq_len + 1):
-        x = data[i:(i + input_seq_len)]
-        y = data[(i + input_seq_len):(i + input_seq_len + output_seq_len)]
-        xs.append(x)
-        ys.append(y)
-    if not xs: # 处理数据过短的情况
-        return np.empty((0, input_seq_len, data.shape[1], data.shape[2])), \
-               np.empty((0, output_seq_len, data.shape[1], data.shape[2]))
-    return np.array(xs), np.array(ys)
+    # 数据加载
+    dl_conf = config['data_loader']['args']
+    logger.info(f"数据加载器配置: {dl_conf}")
+    
+    if 'pred_len' not in config['arch']['args']:
+        config['arch']['args']['pred_len'] = dl_conf['size'][2]
+    elif config['arch']['args']['pred_len'] != dl_conf['size'][2]:
+        logger.warning(f"模型 pred_len ({config['arch']['args']['pred_len']}) 和数据加载器 pred_len ({dl_conf['size'][2]}) 不匹配。使用模型的设置。")
+
+    train_loader = data_provider(dl_conf, 'train')
+    valid_loader = data_provider(dl_conf, 'val')
+    test_loader = data_provider(dl_conf, 'test')
+    logger.info("数据加载器已创建。")
+
+    n_series = train_loader.dataset.data_x.shape[-1]
+    logger.info(f"序列数量 (特征数): {n_series}")
+
+    # 模型
+    model_args = config['arch']['args']
+    model_args['n_series'] = n_series
+    model_args['lag'] = dl_conf['size'][0]
+    
+    logger.info(f"模型参数: {model_args}")
+    model = GrangerCausalFormer(**model_args).to(device)
+
+    # 损失函数和评估指标
+    criterion_config = config.get('loss', {'type': 'MSELoss', 'args': {}})
+    if hasattr(torch.nn, criterion_config['type']):
+        criterion = getattr(torch.nn, criterion_config['type'])(**criterion_config.get('args', {}))
+    else:
+        criterion = getattr(module_loss, criterion_config['type'])(**criterion_config.get('args', {}))
+    logger.info(f"损失函数: {criterion_config['type']}")
+
+    metrics_conf = config.get('metrics', [])
+    metrics_fns = []
+    for met_name in metrics_conf:
+        if hasattr(module_metric, met_name):
+            metrics_fns.append(getattr(module_metric, met_name))
+        else:
+            logger.warning(f"指标 {met_name} 在自定义指标模块中未找到。")
+    logger.info(f"评估指标: {[fn.__name__ for fn in metrics_fns]}")
+
+    # 优化器和学习率调度器
+    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
+    optimizer_conf = config['optimizer']
+    optimizer = getattr(optim, optimizer_conf['type'])(trainable_params, **optimizer_conf['args'])
+    logger.info(f"优化器: {optimizer_conf['type']}，参数: {optimizer_conf['args']}")
+
+    scheduler = None
+    if 'lr_scheduler' in config and config['lr_scheduler']['type'] is not None:
+        scheduler_conf = config['lr_scheduler']
+        scheduler = getattr(lr_scheduler, scheduler_conf['type'])(optimizer, **scheduler_conf['args'])
+        logger.info(f"学习率调度器: {scheduler_conf['type']}，参数: {scheduler_conf['args']}")
+
+    # 初始化并运行训练器
+    trainer = CausalFormerTrainer(
+        model=model,
+        criterion=criterion,
+        metrics_fns=metrics_fns,
+        optimizer=optimizer,
+        config=config,
+        device=device,
+        train_loader=train_loader,
+        valid_loader=valid_loader,
+        test_loader=test_loader,
+        n_series=n_series,
+        lr_scheduler=scheduler,
+        logger=logger
+    )
+    trainer.train()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='CausalFormer 训练脚本')
+    parser.add_argument('-c', '--config', default=None, type=str, required=True,
+                        help='JSON 配置文件的路径 (必需)')
+    parser.add_argument('--device', default=None, type=str,
+                        help='指定 GPU 设备 ID，例如 "0" 或 "0,1"。如果设置，则覆盖配置中的 n_gpu。')
+
+    args = parser.parse_args()
+
+    with open(args.config, 'r', encoding='utf-8') as f: # 指定 utf-8 编码
+        config_data = json.load(f)
+
+    if args.device:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device
+        config_data['n_gpu'] = len(args.device.split(','))
+
+    main(config_data)

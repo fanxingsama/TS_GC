@@ -334,12 +334,13 @@ class PredictModel(nn.Module):
         ffn_hidden (int): FFN 隐藏层维度。
         drop_prob (float): Dropout 概率。
         tau (float): 注意力 softmax 温度。
+        
     """
     def __init__(self, config, d_model, n_head, tcn_channels, tcn_kernel_size, tcn_dropout, n_layers, ffn_hidden, drop_prob, tau):
         super().__init__()
         self.config = config
         self.data_feature = config['data_loader']['args']
-        self.input_window = self.data_feature.get('time_step')
+        self.input_window = self.data_feature.get('input_window')
         self.output_window = self.data_feature.get('output_window')
         self.series_num = self.data_feature.get('series_num')
         self.feature_dim = self.data_feature.get('feature_dim')
