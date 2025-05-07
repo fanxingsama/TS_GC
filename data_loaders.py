@@ -6,6 +6,10 @@ from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from sklearn import preprocessing
 
+# 输入：数据集的路径和真实因果图路径
+# 输出：划分好的dataloader和格兰杰因果图
+
+
 class TimeseriesDataLoader(DataLoader):
     def __init__(self, data_dir=None, dataset=None, batch_size=32, time_step=None, 
                  output_window=None, feature_dim=None, output_dim=None,
@@ -30,12 +34,6 @@ class TimeseriesDataLoader(DataLoader):
             self.df_data = pd.read_csv(self.data_dir)
             self.data_len = len(self.df_data.index)
             self.data = self.df_data.values.astype('float32')
-            
-            # 检查参数
-            assert time_step is not None, "提供data_dir时必须指定time_step"
-            assert output_window is not None, "提供data_dir时必须指定output_window"
-            assert feature_dim is not None, "提供data_dir时必须指定feature_dim"
-            assert output_dim is not None, "提供data_dir时必须指定output_dim"
             
             # 初始化参数
             self.time_step = time_step

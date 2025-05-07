@@ -92,7 +92,7 @@ class TemporalBlock(nn.Module):
         res = x if self.downsample is None else self.downsample(x)
         return self.relu(out + res)
 
-# Granger-TCN (修改后用于集成)
+# Granger-TCN
 class GrangerTCN(nn.Module):
     def __init__(self, input_size, output_size, num_channels_list, kernel_size=3, dropout=0.2):
         """
@@ -130,15 +130,6 @@ class GrangerTCN(nn.Module):
                               padding=padding,
                               dropout=dropout)
             )
-
-        # --- 移除或注释掉原始的最终线性层 ---
-        # 因为最终的预测将在外部的 PredictModel 中完成。
-        # self.linear = nn.Linear(num_channels_list[-1], output_size)
-        # nn.init.xavier_uniform_(self.linear.weight)
-        # if self.linear.bias is not None:
-        #     nn.init.constant_(self.linear.bias, 0)
-        # --- 结束移除 ---
-
     def get_first_block_conv1_weights(self):
         """
         返回第一个 TemporalBlock 中第一个卷积层 (conv1) 的权重张量。
@@ -162,64 +153,9 @@ class GrangerTCN(nn.Module):
             输出张量，是最后一个 TCN 块的完整序列输出。
             形状为 [batch_size, num_channels_last_block, sequence_length]。
         """
-        # --- 输入形状检查与调整 (如果需要) ---
-        # 假设调用者已经将数据调整为 [batch_size, input_size, sequence_length]
-        # if x.shape[1] != self.network_layers[0].conv1.in_channels:
-        #     # 如果输入是 [batch, seq_len, features], 转置
-        #     if x.shape[2] == self.network_layers[0].conv1.in_channels:
-        #          x = x.transpose(1, 2)
-        #     else:
-        #         raise ValueError(f"输入形状 {x.shape} 与 TCN 期望的输入通道数 {self.network_layers[0].conv1.in_channels} 不符。")
-        # --- 结束调整 ---
-
-
         # 将输入传递给所有 TCN 块
         for layer in self.network_layers:
             x = layer(x)
 
-        # --- 返回最后一个 TCN 块的输出 (完整序列) ---
-        # 不应用原始的 self.linear 或只取最后一个时间步
         return x
         # --- 结束修改 ---
-
-# --- 示例用法 (展示修改后的行为) ---
-if __name__ == '__main__':
-    # 超参数
-    batch_size = 16
-    sequence_length = 50
-    input_features = 10  # 输入时间序列的数量 (TCN 的 input_size)
-    # output_size 现在表示最后一个 TCN 块的通道数
-    tcn_channels = [32, 64, 64] # TCN 各层通道数
-    final_tcn_channels = tcn_channels[-1] # 最后一个块的输出通道
-    kernel_size = 3
-    dropout = 0.1
-
-    # 创建模拟输入数据 [batch, channels, time]
-    dummy_input = torch.randn(batch_size, input_features, sequence_length)
-
-    # 实例化修改后的模型
-    # output_size 参数应等于最后一个通道数
-    model = GrangerTCN(input_features, final_tcn_channels, tcn_channels, kernel_size, dropout)
-
-    model.eval() # 设置为评估模式以禁用 dropout
-    with torch.no_grad():
-        tcn_output = model(dummy_input)
-
-    print(f"修改后的 GrangerTCN 输出形状: {tcn_output.shape}")
-    # 期望形状: [batch_size, final_tcn_channels, sequence_length]
-    # 例如: [16, 64, 50]
-    expected_shape = (batch_size, final_tcn_channels, sequence_length)
-    print(f"期望形状: {expected_shape}")
-    assert tcn_output.shape == expected_shape, "输出形状不符合预期！"
-
-    # 检查是否能获取权重
-    weights = model.get_first_block_conv1_weights()
-    if weights is not None:
-        print(f"第一个块 conv1 权重的形状: {weights.shape}")
-        # 期望形状: [tcn_channels[0], input_features, kernel_size]
-        # 例如: [32, 10, 3]
-        expected_weight_shape = (tcn_channels[0], input_features, kernel_size)
-        print(f"期望权重形状: {expected_weight_shape}")
-        assert weights.shape == expected_weight_shape, "权重形状不符合预期！"
-    else:
-        print("未能获取权重。")
