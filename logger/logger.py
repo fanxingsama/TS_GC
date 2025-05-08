@@ -2,7 +2,6 @@
 import logging
 import logging.config
 from pathlib import Path
-from utils import read_json
 import shutil
 import json
 from collections import OrderedDict

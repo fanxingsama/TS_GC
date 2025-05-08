@@ -57,8 +57,6 @@ def prox_group_sparse_group_lasso(weights_for_feature, lambda_gamma, alpha):
     thresholded_weights_step1 = weights_for_feature.clone()
 
     # 步骤 1: (仅当 alpha < 1.0 时相关) 对每个 kernel position 应用 L2 组软阈值
-    # 惩罚项: (1-alpha) * sum_k ||W[:, j, k]||_2
-    # 对应阈值: lambda_gamma * (1 - alpha)
     if alpha < 1.0: # 仅当 L2 部分的惩罚存在时执行
         lambda_gamma_l2 = lambda_gamma * (1.0 - alpha)
         if lambda_gamma_l2 > 0: # 仅当阈值大于0时执行
@@ -70,12 +68,8 @@ def prox_group_sparse_group_lasso(weights_for_feature, lambda_gamma, alpha):
                     lambda_gamma_l2,
                     norm_type='l2'
                 )
-        # 如果 lambda_gamma_l2 == 0 (例如 alpha=1 或 lambda_gamma=0)，则 thresholded_weights_step1 保持不变
-        # 这在 alpha = 1 时是正确的，因为此时 L2 部分的惩罚为零。
 
     # 步骤 2: (仅当 alpha > 0 时相关) 对经过步骤 1 处理后的整个特征权重矩阵应用 Frobenius 组软阈值
-    # 惩罚项: alpha * ||W[:, j, :]||_F
-    # 对应阈值: lambda_gamma * alpha
     final_weights = thresholded_weights_step1 # 如果 alpha = 0, 则这是最终结果
     if alpha > 0.0: # 仅当 Frobenius 部分的惩罚存在时执行
         lambda_gamma_fro = lambda_gamma * alpha
@@ -113,9 +107,8 @@ def calculate_group_lasso_penalty(weights, lambda_reg):
     for j in range(num_input_features):
         group_weights = weights[:, j, :]
         penalty += torch.linalg.norm(group_weights, ord='fro')
-
-    # 乘以正则化强度
-    return lambda_reg * penalty
+    
+    return lambda_reg * penalty # 惩罚乘以正则化强度
 
 # 计算整个权重张量的 组稀疏Lasso 。
 def calculate_group_sparse_group_lasso_penalty(weights, lambda_reg, alpha):
@@ -154,5 +147,5 @@ def calculate_group_sparse_group_lasso_penalty(weights, lambda_reg, alpha):
 
     # 组合两部分惩罚
     total_penalty = alpha * penalty_fro + (1.0 - alpha) * penalty_l2
-    # 乘以正则化强度
-    return lambda_reg * total_penalty
+    
+    return lambda_reg * total_penalty # 惩罚乘以正则化强度

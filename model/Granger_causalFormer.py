@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import math
-from TCN_granger.granger_tcn_model import GrangerTCN
+from .TCN_granger.granger_tcn_model import GrangerTCN
 
 
 Linear = nn.Linear

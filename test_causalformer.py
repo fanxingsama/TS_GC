@@ -10,9 +10,7 @@ from matplotlib import rcParams
 import pandas as pd
 from joblib import load
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
-# Import your custom modules
-from Granger_causalFormer import PredictModel
+from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
 
 # 设置 Matplotlib 中文显示
@@ -164,16 +162,15 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
     
     plt.show()
 
-def main():
-    data_path = '../data/fMRI/timeseries9.csv'
-    gc_dir = '../data/fMRI/sim9_gt_processed.csv'
+def main(png_save_path):
+    data_path = 'data/fMRI/timeseries9.csv'
+    gc_dir = 'data/fMRI/sim9_gt_processed.csv'
     BATCH_SIZE = 64
     DATA_SEED = 42
     INPUT_WINDOW = 20
     OUTPUT_WINDOW = 1
     FEATURE_DIM = 1
     OUTPUT_DIM = 1
-    
     
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -192,7 +189,7 @@ def main():
     print(f"测试集数据大小: {len(test_loader.dataset)}")
     
     # 加载模型最佳参数
-    best_params_file = "best_param.pkl"
+    best_params_file = "best_params.pkl"
     best_params = joblib.load(best_params_file)
     config = {
         'data_loader': {
@@ -225,9 +222,10 @@ def main():
     print("\n绘制预测结果...")
     # 选择前5个序列进行绘制
     plot_indices = list(range(min(5, series_num)))
-    plot_predictions(results, series_num, plot_indices, save_path="prediction_comparison.png")
+    plot_predictions(results, series_num, plot_indices, save_path= png_save_path / "model_predict.png")
 
 if __name__ == "__main__":
-
-    main()
+    run_id = "run_1"  # 
+    png_save_path = Path('saved') / run_id
+    main(png_save_path)
     
