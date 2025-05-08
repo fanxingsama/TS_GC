@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -7,8 +8,6 @@ import torch
 import numpy as np
 import pandas as pd
 from logger.logger import get_logger, setup_logging
-
-
 from TCN_granger.granger_utils import (
     prox_group_lasso,
     prox_group_sparse_group_lasso,
@@ -16,15 +15,8 @@ from TCN_granger.granger_utils import (
     calculate_group_sparse_group_lasso_penalty
 )
 
-import torch.optim as optim
-import torch.optim.lr_scheduler as lr_scheduler
+from util import read_json, write_json
 
-# 默认随机种子
-SEED = 123
-torch.manual_seed(SEED)
-np.random.seed(SEED)
-# torch.backends.cudnn.deterministic = True # 可能会降低速度，如果需要则启用
-# torch.backends.cudnn.benchmark = False   # 如果输入大小不变则启用
 
 class CausalFormerTrainer:
     '''
@@ -45,7 +37,7 @@ class CausalFormerTrainer:
     len_epoch：每个 epoch 的迭代次数（可选，用于迭代式训练）
     '''
     def __init__(self, model, criterion, metrics_fns, optimizer, config, device, series_num,
-                 train_loader, valid_loader, test_loader, penalty_type, lambda_reg, alpha_gsgl,
+                 train_loader, valid_loader, penalty_type, lambda_reg, alpha_gsgl,
                  lr_scheduler=None):
         self.model = model
         self.criterion = criterion
@@ -55,7 +47,6 @@ class CausalFormerTrainer:
         self.series_num = series_num
         self.train_loader = train_loader
         self.valid_loader = valid_loader
-        self.test_loader = test_loader
         self.penalty_type = penalty_type
         self.lambda_reg = lambda_reg
         self.alpha_gsgl = alpha_gsgl
@@ -66,7 +57,7 @@ class CausalFormerTrainer:
         self.save_dir = trainer_conf['save_dir']
 
     # 一个训练轮次
-    def train_epoch(self, epoch):
+    def train_epoch(self):
         self.model.train() # 设置模型为训练模式
         granger_weights_param = self.model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
         epoch_loss = 0.0
@@ -89,7 +80,7 @@ class CausalFormerTrainer:
             # --- 手动执行近端梯度下降更新 ---
             with torch.no_grad():
                 current_penalty = torch.tensor(0.0, device=self.deviceDEVICE)
-                current_weights = granger_weights_param.data # 获取当前权重数据
+                current_weights = granger_weights_param.data  # 获取当前权重数据
                 if self.penalty_type == 'GL':
                     current_penalty = calculate_group_lasso_penalty(current_weights, self.lambda_reg)
                 elif self.penalty_type == 'GSGL':
@@ -152,7 +143,7 @@ class CausalFormerTrainer:
         not_improved_count = 0  # 未改进计数器，用于记录连续未改进的轮数。
         for epoch in range(1, self.epochs + 1):
             print(f"==================第{epoch}轮训练====================")
-            result = self._train_epoch(epoch)
+            result = self.train_epoch(epoch)
             # 监控模型的性能
             best = False
             improved = self.train_metrics['val_loss'] <= self.mnt_best
@@ -167,104 +158,44 @@ class CausalFormerTrainer:
                 self.logger.info(f"一共训练了{epoch}轮，模型的最终结果：{result}")
                 break
             # 只在模型性能有改进时保存
-            self._save_checkpoint(epoch, save_best=best)
+            # self._save_checkpoint(epoch, save_best=best)
 
-    def generate_causality_matrix(self):
-        """
-        计算并保存格兰杰因果关系矩阵。
-        """
-        self.logger.info("正在计算格兰杰因果关系矩阵...")
-        significance_level = self.config.get('causality_params', {}).get('significance_level', 0.05)
+    # 
+    # def generate_causality_matrix(self):
+    #     """
+    #     计算并保存格兰杰因果关系矩阵。
+    #     """
+    #     self.logger.info("正在计算格兰杰因果关系矩阵...")
+    #     significance_level = self.config.get('causality_params', {}).get('significance_level', 0.05)
         
-        causal_matrix = self.model.get_granger_causality_matrix(significance_level=significance_level)
+    #     causal_matrix = self.model.get_granger_causality_matrix(significance_level=significance_level)
         
-        if causal_matrix is not None:
-            if isinstance(causal_matrix, torch.Tensor):
-                causal_matrix_np = causal_matrix.detach().cpu().numpy()
-            else:
-                causal_matrix_np = causal_matrix
+    #     if causal_matrix is not None:
+    #         if isinstance(causal_matrix, torch.Tensor):
+    #             causal_matrix_np = causal_matrix.detach().cpu().numpy()
+    #         else:
+    #             causal_matrix_np = causal_matrix
                 
-            causal_matrix_path_npy = os.path.join(self.save_dir, "granger_causality_matrix.npy")
-            np.save(causal_matrix_path_npy, causal_matrix_np)
-            self.logger.info(f"格兰杰因果关系矩阵 (NumPy 数组) 已保存到 {causal_matrix_path_npy}")
+    #         causal_matrix_path_npy = os.path.join(self.save_dir, "granger_causality_matrix.npy")
+    #         np.save(causal_matrix_path_npy, causal_matrix_np)
+    #         self.logger.info(f"格兰杰因果关系矩阵 (NumPy 数组) 已保存到 {causal_matrix_path_npy}")
 
-            if len(causal_matrix_np.shape) == 2 and causal_matrix_np.shape[0] == self.n_series and causal_matrix_np.shape[1] == self.n_series:
-                try:
-                    series_names = getattr(self.train_loader.dataset, 'feature_names', [f'series_{i}' for i in range(self.n_series)])
-                    if len(series_names) != self.n_series:
-                        series_names = [f'series_{i}' for i in range(self.n_series)]
+    #         if len(causal_matrix_np.shape) == 2 and causal_matrix_np.shape[0] == self.n_series and causal_matrix_np.shape[1] == self.n_series:
+    #             try:
+    #                 series_names = getattr(self.train_loader.dataset, 'feature_names', [f'series_{i}' for i in range(self.n_series)])
+    #                 if len(series_names) != self.n_series:
+    #                     series_names = [f'series_{i}' for i in range(self.n_series)]
 
-                    df_causal_matrix = pd.DataFrame(causal_matrix_np, index=series_names, columns=series_names)
-                    causal_matrix_path_csv = os.path.join(self.save_dir, "granger_causality_matrix.csv")
-                    df_causal_matrix.to_csv(causal_matrix_path_csv)
-                    self.logger.info(f"格兰杰因果关系矩阵也已另存为 CSV 到 {causal_matrix_path_csv}")
-                except Exception as e:
-                    self.logger.error(f"无法将格兰杰因果关系矩阵另存为 CSV: {e}")
-            elif len(causal_matrix_np.shape) != 2:
-                 self.logger.warning(f"格兰杰因果关系矩阵不是二维的 (形状: {causal_matrix_np.shape})，无法直接另存为 N,N CSV。")
-            else:
-                self.logger.warning(f"格兰杰因果关系矩阵是二维的，但形状 {causal_matrix_np.shape} 与 (N={self.n_series}, N={self.n_series}) 不匹配。不另存为 CSV。")
-        else:
-            self.logger.warning("格兰杰因果关系矩阵无法计算或模型返回为 None。")
+    #                 df_causal_matrix = pd.DataFrame(causal_matrix_np, index=series_names, columns=series_names)
+    #                 causal_matrix_path_csv = os.path.join(self.save_dir, "granger_causality_matrix.csv")
+    #                 df_causal_matrix.to_csv(causal_matrix_path_csv)
+    #                 self.logger.info(f"格兰杰因果关系矩阵也已另存为 CSV 到 {causal_matrix_path_csv}")
+    #             except Exception as e:
+    #                 self.logger.error(f"无法将格兰杰因果关系矩阵另存为 CSV: {e}")
+    #         elif len(causal_matrix_np.shape) != 2:
+    #              self.logger.warning(f"格兰杰因果关系矩阵不是二维的 (形状: {causal_matrix_np.shape})，无法直接另存为 N,N CSV。")
+    #         else:
+    #             self.logger.warning(f"格兰杰因果关系矩阵是二维的，但形状 {causal_matrix_np.shape} 与 (N={self.n_series}, N={self.n_series}) 不匹配。不另存为 CSV。")
+    #     else:
+    #         self.logger.warning("格兰杰因果关系矩阵无法计算或模型返回为 None。")
 
-
-def main(config):
-    # 设置记录器
-    log_save_path = Path('saved') / run_id / 'train_result_log'
-    filename = Path('saved') / run_id / 'model'
-    filename.mkdir(parents=True, exist_ok=True)
-    setup_logging(log_save_path)
-    train_logger = get_logger() # 日志记录器
-    write_json(config, Path('saved') / run_id / 'model_config.json') # 模型超参数保存
-    
-    data_loader = init_obj_by_config(config, 'data_loader', module_data) # 初始化数据加载器
-    valid_data_loader = data_loader.split_validation() # 分离出验证集
-    
-    config['data_loader']['args']['series_num'] = data_loader.series_num # 设置数据加载器参数
-    config['data_loader']['args']['time_step'] = data_loader.time_step 
-    config['data_loader']['args']['output_window'] = data_loader.output_window
-    
-    model = init_obj_by_config(config, 'model', module_arch, config) # 构建模型架构,最后加个config是因为model在初始化的时候需要这个参数
-    train_logger.info(model) # 模型架构保存
-    train_logger.info("==============模型训练开始==============")
-    train_logger.info(f"模型所使用数据集: {config['data_loader']['args']['data_dir']}")
-    model = model.cuda() # 将模型加载到设备上
-    criterion = getattr(module_metric, config['loss']) # 获取所需要使用的损失函数
-    metrics = [getattr(module_metric, met) for met in config['metrics']] # 获取所需要使用的评估指标
-
-    trainable_params = filter(lambda p: p.requires_grad, model.parameters()) # 获取需要训练的参数
-    optimizer = init_obj_by_config(config, 'optimizer', torch.optim, trainable_params) # 构建优化器
-    lr_scheduler = init_obj_by_config(config, 'lr_scheduler', torch.optim.lr_scheduler, optimizer) # 构建学习率调整器
-    lam = config['trainer']['lam'] # 获取训练相关参数
-
-    # 开始训练模型
-    trainer = Trainer(model, criterion, metrics, optimizer,
-                      config=config,
-                      data_loader=data_loader,
-                      logger= train_logger,
-                      run_id=run_id,
-                      valid_data_loader=valid_data_loader,
-                      lr_scheduler=lr_scheduler,
-                      lam = lam)
-
-    trainer.train()
-    print('===============模型训练结束==============')
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='CausalFormer 训练脚本')
-    parser.add_argument('-c', '--config', default=None, type=str, required=True,
-                        help='JSON 配置文件的路径 (必需)')
-    parser.add_argument('--device', default=None, type=str,
-                        help='指定 GPU 设备 ID，例如 "0" 或 "0,1"。如果设置，则覆盖配置中的 n_gpu。')
-
-    args = parser.parse_args()
-
-    with open(args.config, 'r', encoding='utf-8') as f: # 指定 utf-8 编码
-        config_data = json.load(f)
-
-    if args.device:
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.device
-        config_data['n_gpu'] = len(args.device.split(','))
-
-    main(config_data)

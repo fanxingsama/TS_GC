@@ -107,6 +107,11 @@ def evaluate_model(model, test_loader, device, series_num, max_samples=100):
     
     return results
 
+# def granger_evaluate():
+    
+    
+#     return granger_re
+
 # 绘制预测结果和真实值对比图
 def plot_predictions(results, series_num, plot_indices, save_path=None):
     """
@@ -159,14 +164,24 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
     
     plt.show()
 
-def main(logger, Dataloader_config):
+def main():
+    data_path = '../data/fMRI/timeseries9.csv'
+    gc_dir = '../data/fMRI/sim9_gt_processed.csv'
+    BATCH_SIZE = 64
+    DATA_SEED = 42
+    INPUT_WINDOW = 20
+    OUTPUT_WINDOW = 1
+    FEATURE_DIM = 1
+    OUTPUT_DIM = 1
+    
+    
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
     
     # 加载数据
-    timeseriesDataLoader = TimeSeriesDataloader(data_dir=Dataloader_config[data_path], gc_dir=Dataloader_config[gc_dir], batch_size=Dataloader_config[BATCH_SIZE], 
-                                            DATA_SEED=Dataloader_config[DATA_SEED], input_window=Dataloader_config[INPUT_WINDOW], output_window=Dataloader_config[OUTPUT_WINDOW])
+    timeseriesDataLoader = TimeSeriesDataloader(data_dir=data_path, gc_dir=gc_dir, batch_size=BATCH_SIZE, 
+                                            DATA_SEED=DATA_SEED, input_window=INPUT_WINDOW, output_window=OUTPUT_WINDOW)
     
     # 获取数据加载器和序列数量
     _, _, test_loader = timeseriesDataLoader.split_sampler()
@@ -177,15 +192,15 @@ def main(logger, Dataloader_config):
     print(f"测试集数据大小: {len(test_loader.dataset)}")
     
     # 加载模型最佳参数
-    best_params_file = "best_model.pkl"
+    best_params_file = "best_param.pkl"
     best_params = joblib.load(best_params_file)
     config = {
         'data_loader': {
             'args': {
-                'input_window': input_window,
-                'output_window': output_window,
-                'feature_dim': feature_dim,
-                'output_dim': output_dim,
+                'input_window': INPUT_WINDOW,
+                'output_window': OUTPUT_WINDOW,
+                'feature_dim': FEATURE_DIM,
+                'output_dim': OUTPUT_DIM,
                 'series_num': series_num
             }
         },
@@ -213,6 +228,6 @@ def main(logger, Dataloader_config):
     plot_predictions(results, series_num, plot_indices, save_path="prediction_comparison.png")
 
 if __name__ == "__main__":
-    
+
     main()
     

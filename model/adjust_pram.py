@@ -10,6 +10,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib import rcParams
+from logger.logger import get_logger, setup_logging
 import optuna
 from Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
@@ -20,6 +21,7 @@ from TCN_granger.granger_utils import (
     calculate_group_lasso_penalty,
     calculate_group_sparse_group_lasso_penalty
 )
+from util import read_json
 
 # 设置 Matplotlib 中文显示
 rcParams['font.family'] = 'SimHei'
@@ -247,6 +249,9 @@ def objective(trial):
     # 返回最终验证集 MSE 给 Optuna
     return final_avg_val_mse if np.isfinite(final_avg_val_mse) else float('inf')
 
+def begin_optuna():
+     return None
+ 
 # --- 3. 创建或加载 Optuna Study 并运行优化 ---
 study = optuna.create_study(
     study_name=STUDY_NAME, # 本次Optuna实验的名称
@@ -310,22 +315,20 @@ if completed_trials:
 else:
     print("\n没有完成的 Trial，无法绘制优化历史。")
 
-
-# def main(run_id):
-#     log_save_path = Path('saved') / run_id / 'train_result_log'
-#     filename = Path('saved') / run_id / 'model'
-#     filename.mkdir(parents=True, exist_ok=True)
-#     setup_logging(log_save_path)
-#     train_logger = get_logger() # 日志记录器
+def main(config, run_id):
+    # 设置记录器
+    log_save_path = Path('saved') / run_id / 'train_result_log'
+    filename = Path('saved') / run_id / 'model'
+    filename.mkdir(parents=True, exist_ok=True)
+    setup_logging(log_save_path)
+    train_logger = get_logger() # 日志记录器
     
-#     train_logger.info(model) # 模型架构保存
-#     train_logger.info("==============模型训练开始==============")
-#     train_logger.info(f"模型所使用数据集: {config['data_loader']['args']['data_dir']}")
+    # train_logger.info(model) # 模型架构保存
+    train_logger.info("==============模型训练开始==============")
+    train_logger.info(f"模型所使用数据集: {config['data_loader']['args']['data_dir']}")
     
-#     print("\n脚本执行完毕。")
-
-# # 单独运行这个文件
-# if __name__ == '__main__':
-#     run_id = datetime.now().strftime(r'%m%d_%H%M%S') # 获得当前时间
-#     main(run_id)
-#     torch.cuda.empty_cache() # 清理显存
+    
+    
+if __name__ == '__main__':
+    run_id = datetime.now().strftime(r'%m%d_%H%M%S') # 获得当前时间
+    main(run_id)

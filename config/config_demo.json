@@ -5,6 +5,9 @@
             "d_model": 256,
             "n_head": 4,
             "n_layers": 1,
+            "tcn_channels": 32,
+            "tcn_kernel": 3,
+            "tcn_dropout": 0.3,
             "ffn_hidden": 512,
             "drop_prob": 0,
             "tau": 100
@@ -13,15 +16,12 @@
     "data_loader": {
         "type": "TimeseriesDataLoader",
         "args": {
-            "data_dir": "data/fMRI/timeseries1.csv",
+            "data_dir": "data/fMRI/timeseries9.csv",
+            "gc_dir": "data/fMRI/sim9_gt_processed.csv",
             "batch_size": 128,
-            "time_step": 32,
-            "output_window": 31,
-            "feature_dim": 1,
-            "output_dim": 1,
-            "shuffle": true,
-            "validation_split": 0.01,
-            "num_workers": 2
+            "data_seed":42,
+            "input_window": 20,
+            "output_window": 1
         }
     },
     "optimizer": {
