@@ -56,7 +56,7 @@ data_path = '../data/fMRI/timeseries9.csv'
 true_gc_path = '../data/fMRI/sim9_gt_processed.csv'
 
 timeseriesDataLoader = TimeSeriesDataloader(data_dir=data_path, gc_dir=true_gc_path, batch_size=BATCH_SIZE, 
-                                            DATA_SEED=DATA_SEED, input_window=INPUT_WINDOW, output_window=OUTPUT_WINDOW, shuffle=True)
+                                            DATA_SEED=DATA_SEED, input_window=INPUT_WINDOW, output_window=OUTPUT_WINDOW)
 GC_true_np = timeseriesDataLoader.get_true_granger() # 得到真实的格兰杰因果矩阵
 train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
 series_num = timeseriesDataLoader.series_num # 获取序列数量
@@ -83,9 +83,9 @@ def objective(trial):
 
     # 近端梯度下降和稀疏性参数
     lr = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)     # 学习率
-    lambda_reg = trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True)# 正则化强度
+    lambda_reg = trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True) # 正则化惩罚项在总损失函数中的整体权重或强度
     penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL']) # 惩罚类型
-    alpha_gsgl = 0.5 # 默认值为 GSGL
+    alpha_gsgl = 0.5 # 仅在GSGL的情况下才有意义，负责控制GSGL内部组稀疏和组内稀疏的平衡
     if penalty_type == 'GSGL':
         alpha_gsgl = trial.suggest_float('alpha_gsgl', 0.1, 0.9)
 
@@ -277,19 +277,19 @@ if completed_trials:
         best_params = best_trial.params
         for key, value in best_params.items():
             print(f"    {key}: {value}")
-        joblib.dump(best_params, f"{STUDY_NAME}_best_params.pkl") # 保存最佳参数
-    except ValueError: # Catches case where no trials complete successfully for best_trial
+        joblib.dump(best_params, "best_params.pkl") # 保存最佳参数
+    except ValueError: 
         print("警告: 没有找到最佳 Trial (可能所有 Trial 都被剪枝或失败)。")
 else:
     print("没有 Trial 成功完成。")
 
 
 # --- 5. Matplotlib可视化优化过程 ---
-if completed_trials: # Check if there are completed trials to plot
+if completed_trials:
     mse_values = [t.value for t in completed_trials if t.value is not None and np.isfinite(t.value)] # 过滤掉 None 和非有限值
     valid_trial_numbers = [t.number for t in completed_trials if t.value is not None and np.isfinite(t.value)]
 
-    if mse_values: # Proceed only if there are valid mse values
+    if mse_values:
         plt.figure(figsize=(12, 7))
         plt.scatter(valid_trial_numbers, mse_values, alpha=0.6, label='完成的 Trials', s=50)
 

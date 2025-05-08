@@ -8,13 +8,11 @@ import torch
 
 class TimeSeriesDataloader():
     def __init__(self, data_dir=None, gc_dir=None, batch_size=64, DATA_SEED=42, 
-                 input_window=None, output_window=None, shuffle=True):
+                 input_window=None, output_window=None):
         self.DATA_SEED = DATA_SEED
         self.batch_size = batch_size
         self.input_window = input_window
         self.output_window = output_window
-        self.shuffle = shuffle
-        
         
         df_a = pd.read_csv(data_dir)
         self.df_b = pd.read_csv(gc_dir, header=None) # 读取真实的格兰杰因果矩阵
