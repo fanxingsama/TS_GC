@@ -3,13 +3,15 @@ from model.TCN_granger.granger_utils import (
     prox_group_lasso,
     prox_group_sparse_group_lasso,
     calculate_group_lasso_penalty,
-    calculate_group_sparse_group_lasso_penalty
+    calculate_group_sparse_group_lasso_penalty,
+    lasso_penalty,
+    PGD_update
 )
 
 
 class CausalFormerTrainer:
-    def __init__(self, model, epoch, criterion, lr, device,
-                 train_loader, valid_loader, penalty_type, lambda_reg, alpha_gsgl):
+    def __init__(self, model, epoch, criterion, lr, device, series_num,
+                 train_loader, valid_loader, penalty_type, lambda_reg):
         self.model = model
         self.epochs = epoch
         self.criterion = criterion
@@ -19,17 +21,22 @@ class CausalFormerTrainer:
         self.valid_loader = valid_loader
         self.penalty_type = penalty_type
         self.lambda_reg = lambda_reg
-        self.alpha_gsgl = alpha_gsgl
+        self.series_num = series_num
         self.early_stop = 3
         self.best_MSE_result = float('inf')
 
     # 一个训练轮次
     def train_epoch(self):
         self.model.train() # 设置模型为训练模式
-        granger_weights_param = self.model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
+        first_layer_param = self.model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
         epoch_loss = 0.0
         epoch_penalty = 0.0
         num_batches = 0
+        
+        lr_list = [self.lr for _ in range(self.series_num)] # 每个序列的学习率列表
+        mse_list = []
+        smooth_list = []
+        loss_list = []
 
         for batch_x, batch_y in self.train_loader:
             batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
@@ -46,34 +53,30 @@ class CausalFormerTrainer:
 
             # --- 手动执行近端梯度下降更新 ---
             with torch.no_grad():
-                current_penalty = torch.tensor(0.0, device=self.device)
-                current_weights = granger_weights_param.data  # 获取当前权重数据
-                if self.penalty_type == 'GL':
-                    current_penalty = calculate_group_lasso_penalty(current_weights, self.lambda_reg)
-                elif self.penalty_type == 'GSGL':
-                    current_penalty = calculate_group_sparse_group_lasso_penalty(current_weights, self.lambda_reg, self.alpha_gsgl)
+                # current_penalty = torch.tensor(0.0, device=self.device)
+                current_weights = first_layer_param.data  # 获取当前权重数据
+                current_penalty = lasso_penalty(current_weights, self.lambda_reg, self.penalty_type) # 得到Lasso之后的正则化值
                 epoch_penalty += current_penalty.item()
 
                 # 更新整个模型的参数
                 for name, param in self.model.named_parameters():
                     if param.grad is None: continue # 跳过没有梯度的参数
 
-                    # 检查是否是需要正则化的权重
-                    is_regularized_weight = (param is granger_weights_param)
-
                     #对第一层使用近端操作符进行近端更新
-                    if is_regularized_weight:
-                        w_tilde = param.data - self.lr * param.grad  # 梯度下降公式
-                        lambda_gamma = self.lr * self.lambda_reg #  是正则化参数，在近端操作中控制正则化的强度。
-                        w_new = torch.zeros_like(w_tilde)  # 初始化新的权重张量
-
-                        if self.penalty_type == 'GL':
-                            for j in range(w_tilde.shape[1]): # 遍历输入特征
-                                w_new[:, j, :] = prox_group_lasso(w_tilde[:, j, :], lambda_gamma)
-                        elif self.penalty_type == 'GSGL':
-                            for j in range(w_tilde.shape[1]):
-                                w_new[:, j, :] = prox_group_sparse_group_lasso(w_tilde[:, j, :], lambda_gamma, self.alpha_gsgl)
-                        param.copy_(w_new) # 更新参数
+                    if param is first_layer_param:
+                        PGD_update(first_layer_param, self.lambda_reg, self.lr, self.penalty_type) # 近端操作符更新第一层的参数
+                        # w_tilde = param.data - self.lr * param.grad  # 梯度下降公式
+                        # lambda_gamma = self.lr * self.lambda_reg #  是正则化参数，在近端操作中控制正则化的强度。
+                        # w_new = torch.zeros_like(w_tilde)  # 初始化新的权重张量
+                        # for j in range(w_tilde.shape[1]): # 遍历输入特征
+                        #     w_new[:, j, :] = prox_group_lasso(w_tilde[:, j, :], lambda_gamma)
+                        # if self.penalty_type == 'GL':
+                        #     for j in range(w_tilde.shape[1]): # 遍历输入特征
+                        #         w_new[:, j, :] = prox_group_lasso(w_tilde[:, j, :], lambda_gamma)
+                        # elif self.penalty_type == 'GSGL':
+                        #     for j in range(w_tilde.shape[1]):
+                        #         w_new[:, j, :] = prox_group_sparse_group_lasso(w_tilde[:, j, :], lambda_gamma, self.alpha_gsgl)
+                        # param.copy_(w_new) # 更新参数
                     else:
                         # 对其他参数执行标准梯度下降
                         param.copy_(param.data - self.lr * param.grad)

@@ -105,12 +105,12 @@ def evaluate_model(model, test_loader, device, series_num, max_samples=100):
     
     return results
 
-# def granger_evaluate():
+# 获得 模型的Granger 因果关系
+# def get_GC_and_save(model, threshold=True, ignore_lag=True):
+#     GC = model.get_GC(threshold=True, ignore_lag=True)
     
-    
-#     return granger_re
 
-# 绘制预测结果和真实值对比图
+# 绘制预测结果和真实值的时序序列对比图
 def plot_predictions(results, series_num, plot_indices, save_path=None):
     """
     Args:
@@ -189,7 +189,7 @@ def main(png_save_path):
     print(f"测试集数据大小: {len(test_loader.dataset)}")
     
     # 加载模型最佳参数
-    best_params_file = "best_params.pkl"
+    best_params_file = png_save_path / "best_params.pkl"
     best_params = joblib.load(best_params_file)
     config = {
         'data_loader': {
@@ -225,7 +225,7 @@ def main(png_save_path):
     plot_predictions(results, series_num, plot_indices, save_path= png_save_path / "model_predict.png")
 
 if __name__ == "__main__":
-    run_id = "run_1"  # 
+    run_id = "05-09_15-06-15"  # 
     png_save_path = Path('saved') / run_id
     main(png_save_path)
     

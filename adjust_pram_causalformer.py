@@ -86,16 +86,16 @@ def objective(trial, logger):
     criterion = loss_functions_list[loss_function_name]  # 从字典中获取实际的损失函数对象
     lr = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)     # 学习率
     lambda_reg = trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True) # 正则化惩罚项在总损失函数中的整体权重或强度
-    penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL']) # 惩罚类型
-    alpha_gsgl = 0.5 # 仅在GSGL的情况下才有意义，负责控制GSGL内部组稀疏和组内稀疏的平衡
-    if penalty_type == 'GSGL':
-        alpha_gsgl = trial.suggest_float('alpha_gsgl', 0.1, 0.9)
+    # penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL']) # 惩罚类型
+    penalty_type = 'GL' # 惩罚类型
+    # alpha_gsgl = 0.5 # 仅在GSGL的情况下才有意义，负责控制GSGL内部组稀疏和组内稀疏的平衡
+    # if penalty_type == 'GSGL':
+    #     alpha_gsgl = trial.suggest_float('alpha_gsgl', 0.1, 0.9)
 
     print(f"\n--- Trial {trial.number} ---")
     print(f"  CausalFormer 参数: input_window={input_window}, d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
     print(f"  GrangerTCN 参数: layers={tcn_layers}, channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}, loss_function={loss_function_name}")
-    print(f"  优化参数: lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}"
-          f"{f', alpha={alpha_gsgl:.2f}' if penalty_type == 'GSGL' else ''}")
+    print(f"  优化参数: lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}")
 
     # --- 模型和损失函数 ---
     # 创建配置字典传递给 PredictModel
@@ -128,12 +128,12 @@ def objective(trial, logger):
     final_avg_val_mse = float('inf')
 
     # 查找需要正则化的参数对象，这个路径取决于 PredictModel -> Encoder -> EncoderLayer -> MultiHeadAttention -> GrangerTCN -> TemporalBlock -> conv1
-    granger_weights_param = model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
+    # granger_weights_param = model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
 
     # ---开始训练---
     causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, criterion=criterion,lr=lr, device=DEVICE,
-                                               train_loader=train_loader, valid_loader=val_loader,
-                                               penalty_type=penalty_type, lambda_reg=lambda_reg, alpha_gsgl=alpha_gsgl)
+                                               train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
+                                               penalty_type=penalty_type, lambda_reg=lambda_reg)
     final_avg_val_mse = causalFormerTrainer.train()
 
     logger.info(f"Trial {trial.number} 完成。最终验证集 AUROC: {final_val_auroc:.4f}, 最终验证集 MSE: {final_avg_val_mse:.6f}")

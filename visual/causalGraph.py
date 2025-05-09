@@ -13,7 +13,6 @@ def load_causal_data(file_path):
     try:
         df = pd.read_csv(file_path)
         
-        # 确保CSV文件有3列
         if len(df.columns) != 3:
             print(f"警告: CSV文件应该有3列 (头结点, 尾结点, 延迟), 但发现{len(df.columns)}列")
             return None

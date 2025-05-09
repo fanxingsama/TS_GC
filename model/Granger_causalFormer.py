@@ -196,8 +196,6 @@ class MultiHeadAttention(nn.Module):
 
         return out
 
-    def get_granger_weights(self):
-        return self.tcn_processor.get_first_block_conv1_weights()
 
 # 位置前馈层
 class PositionwiseFeedForward(nn.Module):
@@ -269,8 +267,6 @@ class EncoderLayer(nn.Module):
         x_norm2 = self.norm2(x_res2)
         return x_norm2
 
-    def get_granger_weights(self):
-        return self.attention.get_granger_weights()
 
 # 编码器
 class Encoder(nn.Module):
@@ -315,10 +311,6 @@ class Encoder(nn.Module):
         return out
         # 输出 x: [batch_size, series_num, input_window, feature_dim]
 
-    def get_granger_weights(self, layer_index=0):
-        if layer_index < 0 or layer_index >= len(self.layers):
-            raise IndexError("layer_index out of bounds.")
-        return self.layers[layer_index].get_granger_weights()
 
 # 最终预测模型
 class PredictModel(nn.Module):
@@ -377,9 +369,54 @@ class PredictModel(nn.Module):
         out = out.unsqueeze(1) # [batch_size, 1, series_num, output_dim]
         if self.output_window > 1:
             out = out.repeat(1, self.output_window, 1, 1)
-        # Transpose to match target shape [batch_size, output_window, series_num, output_dim]
-        # No, the shape is already correct based on the tuning script target y_train_tensor
         return out
 
-    def get_granger_weights(self, layer_index=0):
-        return self.encoder.get_granger_weights(layer_index)
+    # def get_GC(self, threshold=True, ignore_lag=True):
+    #     GC_list_from_each_encoder_first_block = []
+    #     for encoder_layer in self.encoder.layers:  # 遍历 EncoderLayer 实例
+    #         tcn_processor = encoder_layer.attention.tcn_processor  # 这是一个 GrangerTCN 实例
+            
+    #         if tcn_processor.network_layers:  # 检查 TCN 是否有 TemporalBlock
+    #             # 我们只关心 TCN 的第一个 TemporalBlock，因为它的输入直接对应 P 个原始序列
+    #             first_temporal_block = tcn_processor.network_layers[0]
+                
+    #             # first_temporal_block.conv1.weight 的形状是:
+    #             # [out_channels_C1, in_channels_P, kernel_size_K_tcn]
+    #             # 其中 in_channels_P 是 self.series_num (原始序列数)
+                
+    #             current_norm = None
+    #             if ignore_lag:
+    #                 # 计算范数时，聚合 out_channels (dim 0) 和 kernel_size (dim 2)
+    #                 # 得到每个输入序列 (in_channels_P) 的一个标量影响值
+    #                 # 结果形状: [in_channels_P]
+    #                 current_norm = torch.norm(first_temporal_block.conv1.weight, dim=(0, 2))
+    #             else:
+    #                 # 计算范数时，只聚合 out_channels (dim 0)
+    #                 # 保留了 kernel_size 维度，表示每个输入序列在不同卷积核位置（滞后）的影响
+    #                 # 结果形状: [in_channels_P, kernel_size_K_tcn]
+    #                 current_norm = torch.norm(first_temporal_block.conv1.weight, dim=0)
+                
+    #             GC_list_from_each_encoder_first_block.append(current_norm)
+
+    #     if not GC_list_from_each_encoder_first_block:
+    #         # 如果没有 encoder layer 或 TCN block，返回一个空张量
+    #         # 或者可以根据 series_num 和 tcn_kernel_size 返回特定形状的零张量
+    #         # 例如: return torch.zeros(0, self.series_num).to(self.device) if ignore_lag else torch.zeros(0, self.series_num, self.config['model']['args']['tcn_kernel_size']).to(self.device)
+    #         return torch.empty(0, device=self.device)
+
+
+    #     # GC_list_from_each_encoder_first_block 中的所有张量现在都具有相同的形状:
+    #     #   - 如果 ignore_lag=True: [series_num]
+    #     #   - 如果 ignore_lag=False: [series_num, tcn_kernel_size]
+        
+    #     # 将来自每个 encoder layer 的 GC 张量堆叠起来
+    #     # dim=0 表示将它们堆叠成一个新的第0维度 (num_encoder_layers)
+    #     GC_stacked = torch.stack(GC_list_from_each_encoder_first_block, dim=0)
+    #     # GC_stacked 的形状:
+    #     #   - 如果 ignore_lag=True: [num_encoder_layers, series_num]
+    #     #   - 如果 ignore_lag=False: [num_encoder_layers, series_num, tcn_kernel_size]
+
+    #     if threshold:
+    #         return (GC_stacked > 0).int()
+    #     else:
+    #         return GC_stacked

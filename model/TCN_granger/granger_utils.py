@@ -137,10 +137,8 @@ def calculate_group_sparse_group_lasso_penalty(weights, lambda_reg, alpha):
 
     # 累加 Frobenius 和 L2 范数部分
     for j in range(num_input_features):
-        # Frobenius 部分: ||W[:, j, :]||_F
         group_weights_matrix = weights[:, j, :]
         penalty_fro += torch.linalg.norm(group_weights_matrix, ord='fro')
-        # L2 部分: sum_k ||W[:, j, k]||_2
         for k in range(kernel_size):
             group_weights_vector = weights[:, j, k]
             penalty_l2 += torch.linalg.norm(group_weights_vector, ord=2)
@@ -149,3 +147,58 @@ def calculate_group_sparse_group_lasso_penalty(weights, lambda_reg, alpha):
     total_penalty = alpha * penalty_fro + (1.0 - alpha) * penalty_l2
     
     return lambda_reg * total_penalty # 惩罚乘以正则化强度
+
+# 对神经网络的第一层权重矩阵进行近端更新，作用于函数，直接对函数的参数进行稀疏性约束，使得某些参数被设置为零，从而实现稀疏性。
+def PGD_update(network, lam, lr, penalty):
+    '''
+    Args:
+      network: MLP network.
+      lam: 正则化参数
+      lr: 学习率
+      penalty: one of GL (group lasso), GSGL (group sparse group lasso),
+        H (hierarchical).
+    '''
+    # W = network.layers[0].weight
+    # hidden, p, lag = W.shape
+    if penalty == 'GL': # 组Loss惩罚
+        norm = torch.norm(network, dim=(0, 2), keepdim=True)
+        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
+                  * torch.clamp(norm - (lr * lam), min=0.0))
+    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
+        norm = torch.norm(network, dim=0, keepdim=True)
+        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
+                  * torch.clamp(norm - (lr * lam), min=0.0))
+        norm = torch.norm(network, dim=(0, 2), keepdim=True)
+        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
+                  * torch.clamp(norm - (lr * lam), min=0.0))
+    # elif penalty == 'H': # 层次Lasso惩罚
+    #     # Lowest indices along third axis touch most lagged values.
+    #     for i in range(lag):
+    #         norm = torch.norm(W[:, :, :(i + 1)], dim=(0, 2), keepdim=True)
+    #         W.data[:, :, :(i+1)] = (
+    #             (W.data[:, :, :(i+1)] / torch.clamp(norm, min=(lr * lam)))
+    #             * torch.clamp(norm - (lr * lam), min=0.0))
+    else:
+        raise ValueError('unsupported penalty: %s' % penalty)
+
+# 计算第一层权重矩阵的正则化项，正则化是在损失函数里加入惩罚项，限制模型复杂度，让模型参数变得更简洁
+def lasso_penalty(network, lam, penalty):
+    '''
+    Args:
+      network: MLP network.
+      penalty: one of GL (group lasso), GSGL (group sparse group lasso),
+        H (hierarchical).
+    '''
+    # W = network.layers[0].weight # 选择第一层
+    # hidden, p, lag = W.shape
+    if penalty == 'GL': # 组Loss惩罚
+        return lam * torch.sum(torch.norm(network, dim=(0, 2)))
+    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
+        return lam * (torch.sum(torch.norm(network, dim=(0, 2)))
+                      + torch.sum(torch.norm(network, dim=0)))
+    # elif penalty == 'H': # 层次Lasso惩罚
+    #     # Lowest indices along third axis touch most lagged values.
+    #     return lam * sum([torch.sum(torch.norm(W[:, :, :(i+1)], dim=(0, 2)))
+    #                       for i in range(lag)])
+    else:
+        raise ValueError('unsupported penalty: %s' % penalty)
