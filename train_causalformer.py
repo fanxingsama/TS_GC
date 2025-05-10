@@ -1,9 +1,5 @@
 import torch
 from model.TCN_granger.granger_utils import (
-    prox_group_lasso,
-    prox_group_sparse_group_lasso,
-    calculate_group_lasso_penalty,
-    calculate_group_sparse_group_lasso_penalty,
     lasso_penalty,
     PGD_update
 )

@@ -122,6 +122,7 @@ class MultiHeadAttention(nn.Module):
         # V的处理
         tcn_input_size = self.series_num
         tcn_output_channels = tcn_channels[-1]
+        # 实际上是没有构建多个TCN的
         self.tcn_processor = GrangerTCN(input_size=tcn_input_size,
                                         output_size=tcn_output_channels,
                                         num_channels_list=tcn_channels,
@@ -196,7 +197,6 @@ class MultiHeadAttention(nn.Module):
 
         return out
 
-
 # 位置前馈层
 class PositionwiseFeedForward(nn.Module):
     """
@@ -267,7 +267,6 @@ class EncoderLayer(nn.Module):
         x_norm2 = self.norm2(x_res2)
         return x_norm2
 
-
 # 编码器
 class Encoder(nn.Module):
     """
@@ -310,7 +309,6 @@ class Encoder(nn.Module):
             out = layer(embedding, out)
         return out
         # 输出 x: [batch_size, series_num, input_window, feature_dim]
-
 
 # 最终预测模型
 class PredictModel(nn.Module):
