@@ -74,7 +74,7 @@ def objective(trial, logger):
     tcn_channels = trial.suggest_categorical('tcn_channels', [16, 32, 48]) # TCN 通道数
     tcn_kernel_size = trial.suggest_categorical('tcn_kernel_size', [2, 3, 4]) # TCN 核大小
     tcn_dropout = trial.suggest_float('tcn_dropout', 0.0, 0.3)          # TCN Dropout
-    tcn_channel_list = [tcn_channels] * tcn_layers
+    # tcn_channel_list = [tcn_channels] * tcn_layers
 
     # 近端梯度下降和稀疏性参数
     loss_functions_list = {
@@ -116,7 +116,7 @@ def objective(trial, logger):
                          d_model=d_model,
                          n_head=n_head,
                          n_layers=n_layers,
-                         tcn_channels=tcn_channel_list,
+                         tcn_channels=tcn_channels,
                          tcn_kernel_size=tcn_kernel_size,
                          tcn_dropout=tcn_dropout,
                          ffn_hidden=ffn_hidden,

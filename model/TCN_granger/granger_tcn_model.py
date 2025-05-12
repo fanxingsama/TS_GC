@@ -89,36 +89,39 @@ class TemporalBlock(nn.Module):
         return self.relu(out + res)
 
 class GrangerTCN(nn.Module):
-    def __init__(self, input_size, output_size, num_channels_list, kernel_size=3, dropout=0.2):
+    def __init__(self, input_size, output_size, num_channels, kernel_size=3, dropout=0.2):
         """
         Args:
-            num_channels_list (list of int): 一个列表，其中每个元素指定了对应 TemporalBlock 的输出通道数。
-                                             列表的长度决定了 TCN 的层数/块数。
+            input_size (int): 输入通道数，代表除了目标时间序列外的其他序列数量 (n-1)。
+            output_size (int): 输出通道数，对应最终的输出维度。
+            num_channels (int): 每个 TemporalBlock 的隐藏通道数，卷积的时候从数据中提取到的特征数量。
             kernel_size (int): 卷积核大小。
+            dropout (float): Dropout 比率。
         """
         super(GrangerTCN, self).__init__()
 
-        # 验证 output_size 是否与最后一个通道数匹配
-        # if output_size != num_channels_list[-1]:
-        #     print(f"警告: GrangerTCN 的 output_size ({output_size}) 与 num_channels_list 的最后一个元素 ({num_channels_list[-1]}) 不匹配。将使用 num_channels_list 的最后一个元素作为 TCN 的最终输出通道数。")
-        #     # output_size = num_channels_list[-1] # 内部使用最后一个通道数
-
-        self.network_layers = nn.ModuleList() # 使用 ModuleList 存储网络层
-
-        # 构建 TCN 层
-        for i in range(len(num_channels_list)): # 
-            dilation_size = 2 ** i # 膨胀系数指数增长
-            # 确定当前层的输入通道数
-            in_channels = input_size if i == 0 else num_channels_list[i-1]
-            out_channels = num_channels_list[i]
-            
-            padding = (kernel_size - 1) * dilation_size # 计算因果卷积所需的填充量
-            self.network_layers.append(
-                TemporalBlock(in_channels, out_channels, kernel_size, stride=1,
-                              dilation=dilation_size,
-                              padding=padding,
-                              dropout=dropout)
-            )
+        # 固定使用2个TCN-block
+        self.network_layers = nn.ModuleList()
+        
+        # 第一个 TemporalBlock
+        dilation_size = 1  # 第一个block的膨胀系数为1
+        padding = (kernel_size - 1) * dilation_size
+        self.network_layers.append(
+            TemporalBlock(input_size, num_channels, kernel_size, stride=1,
+                          dilation=dilation_size,
+                          padding=padding,
+                          dropout=dropout)
+        )
+        
+        # 第二个 TemporalBlock
+        dilation_size = 2  # 第二个block的膨胀系数为2
+        padding = (kernel_size - 1) * dilation_size
+        self.network_layers.append(
+            TemporalBlock(num_channels, output_size, kernel_size, stride=1,
+                          dilation=dilation_size,
+                          padding=padding,
+                          dropout=dropout)
+        )
     def get_first_block_conv1_weights(self):
         return self.network_layers[0].conv1.weight
 

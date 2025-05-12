@@ -24,7 +24,7 @@ class CausalFormerTrainer:
     # 一个训练轮次
     def train_epoch(self):
         self.model.train() # 设置模型为训练模式
-        first_layer_param = self.model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
+        first_layer_param = self.model.encoder.layers[0].attention.tcn_processors[0].network_layers[0].conv1.weight
         epoch_loss = 0.0
         epoch_penalty = 0.0
         num_batches = 0

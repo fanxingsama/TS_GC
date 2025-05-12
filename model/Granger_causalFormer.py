@@ -119,19 +119,24 @@ class MultiHeadAttention(nn.Module):
         self.Wq.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model)))
         self.Wk.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model)))
 
-        # V的处理
-        tcn_input_size = self.series_num
-        tcn_output_channels = tcn_channels[-1]
-        # 实际上是没有构建多个TCN的
-        self.tcn_processor = GrangerTCN(input_size=tcn_input_size,
-                                        output_size=tcn_output_channels,
-                                        num_channels_list=tcn_channels,
-                                        kernel_size=tcn_kernel_size,
-                                        dropout=tcn_dropout)
+        # V的处理，为每个时间序列创建单独的TCN
+        self.tcn_processors = nn.ModuleList()
+        for i in range(self.series_num):
+            # 每个TCN的输入是除了目标序列之外的所有序列 (series_num - 1)
+            tcn_input_size = self.series_num - 1
+            tcn_output_size = tcn_channels  # 使用相同的输出通道数
+            
+            self.tcn_processors.append(
+                GrangerTCN(input_size=tcn_input_size,
+                          output_size=tcn_output_size,
+                          num_channels=tcn_channels,
+                          kernel_size=tcn_kernel_size,
+                          dropout=tcn_dropout)
+            )
 
         self.v_feature_dim = self.d_model
-        self.Wv_proj = Linear(tcn_output_channels, self.series_num * self.v_feature_dim)
-        self.Wv_proj.weight.data.normal_(0, math.sqrt(2.0 / (tcn_output_channels + self.series_num * self.v_feature_dim)))
+        self.Wv_proj = Linear(tcn_channels, self.v_feature_dim)
+        self.Wv_proj.weight.data.normal_(0, math.sqrt(2.0 / (tcn_channels + self.v_feature_dim)))
         
         # 构建注意力对象
         self.attention = MultiVariateCausalAttention(self.d_tensor, self.tau)
@@ -174,18 +179,36 @@ class MultiHeadAttention(nn.Module):
         batch_size = x_input.size(0)
         q, k = self.Wq(q_emb), self.Wk(k_emb)
 
-        # --- V 处理：通过 GrangerTCN 和投影层 ---
+        # --- V 处理：为每个时间序列使用单独的TCN ---
         if self.feature_dim > 1:
-            x_tcn_input_correct_shape = x_input[:, :, :, 0] # [B, N, T]
+            x_tcn_input = x_input[:, :, :, 0]  # [B, N, T]
         else:
-             x_tcn_input_correct_shape = x_input.squeeze(-1) # [B, N, T]
+            x_tcn_input = x_input.squeeze(-1)  # [B, N, T]
 
-        tcn_output = self.tcn_processor(x_tcn_input_correct_shape) # Pass [B, N, T]
-        tcn_output = tcn_output.transpose(1, 2) # -> [B, T, C_tcn]
-
-        v_projected = self.Wv_proj(tcn_output) # [B, T, N * Fv]
-        v = v_projected.view(batch_size, self.input_window, self.series_num, self.v_feature_dim)
-        v = v.transpose(1, 2) # -> [B, N, T, Fv] (Fv = d_model)
+        # 存储每个序列的TCN输出
+        all_tcn_outputs = []
+        
+        for i in range(self.series_num):
+            # 将所有除了目标序列之外的序列作为输入
+            mask = torch.ones(self.series_num, dtype=torch.bool, device=self.device)
+            mask[i] = False  # 排除目标序列
+            
+            # 提取除了目标序列外的所有序列
+            other_series = x_tcn_input[:, mask, :]  # [B, N-1, T]
+            
+            # 将序列输入到当前TCN
+            tcn_out = self.tcn_processors[i](other_series)  # [B, output_size, T]
+            all_tcn_outputs.append(tcn_out)
+        
+        # 堆叠所有TCN输出
+        stacked_outputs = torch.stack(all_tcn_outputs, dim=1)  # [B, N, output_size, T]
+        
+        # 调整维度顺序以便后续处理
+        tcn_output = stacked_outputs.permute(0, 3, 1, 2)  # [B, T, N, C_tcn]
+        
+        # 投影到V空间
+        v_projected = self.Wv_proj(tcn_output)  # [B, T, N, v_feature_dim]
+        v = v_projected.permute(0, 2, 1, 3)  # -> [B, N, T, v_feature_dim]
 
         q, k = self.split(q), self.split(k)
         v = self.split(v)
@@ -245,6 +268,7 @@ class EncoderLayer(nn.Module):
         self.attention = MultiHeadAttention(series_num, input_window, feature_dim, d_model, n_head,
                                             tcn_channels, tcn_kernel_size, tcn_dropout,
                                             tau, device)
+        
         self.norm1 = LayerNorm([input_window, feature_dim])
         self.dropout1 = Dropout(drop_prob)
         self.ffn = PositionwiseFeedForward(dim=feature_dim, hidden=ffn_hidden, drop_prob=drop_prob)
