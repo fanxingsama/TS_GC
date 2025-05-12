@@ -7,14 +7,18 @@ import torch
 
 
 class TimeSeriesDataloader():
+    '''
+    input_window: 输入序列长度，每次预测的时候使用多少个数据点
+    output_window: 输出序列长度，预测多少个数据点
+    '''
     def __init__(self, data_dir=None, gc_dir=None, batch_size=64, DATA_SEED=42, 
-                 input_window=None, output_window=None):
+                 input_window=None, output_window=1):
         self.DATA_SEED = DATA_SEED
         self.batch_size = batch_size
         self.input_window = input_window
         self.output_window = output_window
         
-        df_a = pd.read_csv(data_dir)
+        df_a = pd.read_csv(data_dir) # 形状: [series_len, series_num]，series_len：时间序列长度，series_num：时间序列数量
         self.df_b = pd.read_csv(gc_dir, header=None) # 读取真实的格兰杰因果矩阵
         
         X_np = df_a.values  # 获取所有的数据点
@@ -22,7 +26,8 @@ class TimeSeriesDataloader():
         self.series_num = len(series_names) # 获取序列数量
         
         self.series_to_idx = {name: i for i, name in enumerate(series_names)} # 创建从序列名称到索引的映射
-        self.X_np = X_np[:, :, np.newaxis] # 给序列增加一个新的维度，最后一个维度是序列的特征数量，X_np表示每一个序列的形状: [T, P, 1]
+        # T：时间序列数量，P：时间序列长度
+        self.X_np = X_np[:, :, np.newaxis] # 给序列增加一个新的维度，最后一个维度是序列的特征数量，X_np表示每一个序列的形状: [series_len, series_num, 1]
         
     #  划分数据集
     def split_sampler(self):
@@ -33,14 +38,14 @@ class TimeSeriesDataloader():
         # --- 构造模型可接收的输入 ---
         X_train_seq, y_train_seq = create_sequences(X_train_np, self.input_window, self.output_window)
         X_val_seq, y_val_seq = create_sequences(X_val_np, self.input_window, self.output_window)
-        X_test_sql, y_test_seq = create_sequences(X_test_np, self.input_window, self.output_window)
+        X_test_seq, y_test_seq = create_sequences(X_test_np, self.input_window, self.output_window)
 
         # 转换为 PyTorch 张量
         X_train_tensor = torch.tensor(X_train_seq, dtype=torch.float32)
-        y_train_tensor = torch.tensor(y_train_seq, dtype=torch.float32) # 形状: [N, T_out, P, F_out]
+        y_train_tensor = torch.tensor(y_train_seq, dtype=torch.float32)
         X_val_tensor = torch.tensor(X_val_seq, dtype=torch.float32)
         y_val_tensor = torch.tensor(y_val_seq, dtype=torch.float32)
-        X_test_tensor = torch.tensor(X_test_sql, dtype=torch.float32)
+        X_test_tensor = torch.tensor(X_test_seq, dtype=torch.float32)
         y_test_tensor = torch.tensor(y_test_seq, dtype=torch.float32)
         
         # 创建数据集加载器
@@ -55,6 +60,7 @@ class TimeSeriesDataloader():
         
         # 返回训练集和验证集的采样器
         return train_loader, val_loader, test_loader
+        # return X_train_seq, y_train_seq
         
     
     # 从文件中读取真实的格兰杰因果关系
@@ -76,23 +82,36 @@ class TimeSeriesDataloader():
         return GC_true_np # 返回真实的格兰杰因果矩阵
     
 # --- 辅助函数：创建序列 (适配 CausalFormer 输入输出) ---
+
 def create_sequences(data, input_seq_len, output_seq_len):
     """
+    创建输入序列和输出序列用于时间序列预测
+    
     Args:
-        data (np.array): 输入数据，形状 [时间步, 序列数量, 特征数量]。
+        data (np.array): 输入数据，形状 [序列长度, 时间序列数量, 特征数量]。
         input_seq_len (int): 输入序列长度 (输入窗口)。
         output_seq_len (int): 输出序列长度 (输出窗口)。
+    
     Returns:
-        Tuple[np.array, np.array]: X (输入序列), Y (目标序列)
-            X 形状: [样本数量, input_seq_len, 序列数量, 特征数量]
-            Y 形状: [样本数量, output_seq_len, 序列数量, 特征数量]
+        tuple: (输入序列数组, 输出序列数组)
+            - 输入序列形状: [样本数, 输入序列长度, 时间序列数量, 特征数量]
+            - 输出序列形状: [样本数, 输出序列长度, 时间序列数量, 特征数量]
     """
     xs, ys = [], []
     total_len = len(data)
-
+    
+    # 确保有足够的数据创建序列
+    if total_len < input_seq_len + output_seq_len:
+        raise ValueError(f"数据长度 {total_len} 小于输入窗口 {input_seq_len} 加输出窗口 {output_seq_len} 的总和")
+    
+    # 滑动窗口创建序列
     for i in range(total_len - input_seq_len - output_seq_len + 1):
-        x = data[i:(i + input_seq_len)]  # 提取输入序列
-        y = data[(i + input_seq_len):(i + input_seq_len + output_seq_len)]  # 提取目标序列
-        xs.append(x)  # 将输入序列添加到列表 xs 中
-        ys.append(y)  # 将目标序列添加到列表 ys 中
+        # 输入窗口
+        x_window = data[i:i+input_seq_len]
+        # 输出窗口 (紧跟在输入窗口之后)
+        y_window = data[i+input_seq_len:i+input_seq_len+output_seq_len]
+        
+        xs.append(x_window)
+        ys.append(y_window)
+    
     return np.array(xs), np.array(ys)

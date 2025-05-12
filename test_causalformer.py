@@ -7,8 +7,6 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-import pandas as pd
-from joblib import load
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
@@ -31,11 +29,9 @@ def load_model(config, best_params, device):
     tau = best_params['tau']
     
     # GrangerTCN 参数
-    tcn_layers = best_params['tcn_layers']
     tcn_channels = best_params['tcn_channels']
     tcn_kernel_size = best_params['tcn_kernel_size']
     tcn_dropout = best_params['tcn_dropout']
-    tcn_channel_list = [tcn_channels] * tcn_layers
     
     # 创建并返回模型
     model = PredictModel(
@@ -43,7 +39,7 @@ def load_model(config, best_params, device):
         d_model=d_model,
         n_head=n_head,
         n_layers=n_layers,
-        tcn_channels=tcn_channel_list,
+        tcn_channels=tcn_channels,
         tcn_kernel_size=tcn_kernel_size,
         tcn_dropout=tcn_dropout,
         ffn_hidden=ffn_hidden,
@@ -128,7 +124,7 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
     time_steps = np.arange(n_samples)
     
     # 创建足够大的图表
-    plt.figure(figsize=(15, 3 * len(plot_indices)))
+    plt.figure(figsize=(10, 2 * len(plot_indices)))
     
     # 为每个选定的时间序列创建子图
     for i, idx in enumerate(plot_indices):
@@ -225,7 +221,7 @@ def main(png_save_path):
     plot_predictions(results, series_num, plot_indices, save_path= png_save_path / "model_predict.png")
 
 if __name__ == "__main__":
-    run_id = "05-09_15-06-15"  # 
+    run_id = "05-12_12-46-34"  # 
     png_save_path = Path('saved') / run_id
     main(png_save_path)
     

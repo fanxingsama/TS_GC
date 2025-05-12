@@ -24,15 +24,17 @@ rcParams['axes.unicode_minus'] = False
 # 参数设置
 # P = 5           # 时间序列的数量
 # T = 1000        # 总时间点
-LAG = 2         # 真实的 VAR 滞后
-SPARSITY = 0.4  # 格兰杰因果矩阵的稀疏度
-BETA_VALUE = 0.8# 系数值
-SD = 0.1        # 噪声的标准差
+# LAG = 2         # 真实的 VAR 滞后
+# SPARSITY = 0.4  # 格兰杰因果矩阵的稀疏度
+# BETA_VALUE = 0.8# 系数值
+# SD = 0.1        # 噪声的标准差
+
 DATA_SEED = 42  # 用于可重复性的随机种子
-INPUT_WINDOW = 20 # 输入序列长度 (输入窗口)
+INPUT_WINDOW = 10 # 输入序列长度 (输入窗口)
+OUTPUT_WINDOW = 1 # 预测下一个时间步
 FEATURE_DIM = 1 # 每个时间序列在每个时间点上的特征数量
 OUTPUT_DIM = 1  # 每个时间序列在每个预测时间步上输出的目标数量
-OUTPUT_WINDOW = 1 # 预测下一个时间步
+
 
 # --- 训练和 Optuna 参数 ---
 EPOCHS = 10
@@ -60,8 +62,6 @@ def objective(trial, logger):
     global GC_true_np,  FEATURE_DIM, OUTPUT_DIM
     
     # CausalFormer 参数
-    input_window = INPUT_WINDOW # 输入序列长度
-    output_window = OUTPUT_WINDOW # 固定预测下一步
     d_model = trial.suggest_categorical('d_model', [32, 64, 128])       # QK 嵌入维度
     n_head = trial.suggest_categorical('n_head', [2, 4, 8])             # 注意力头数
     n_layers = trial.suggest_int('n_layers', 1, 3)                      # Encoder 层数
@@ -70,11 +70,9 @@ def objective(trial, logger):
     tau = trial.suggest_float('tau', 0.5, 10.0, log=True)               # Softmax 温度
 
     # GrangerTCN 参数
-    tcn_layers = trial.suggest_int('tcn_layers', 2, 5)                  # TCN 块数
     tcn_channels = trial.suggest_categorical('tcn_channels', [16, 32, 48]) # TCN 通道数
     tcn_kernel_size = trial.suggest_categorical('tcn_kernel_size', [2, 3, 4]) # TCN 核大小
     tcn_dropout = trial.suggest_float('tcn_dropout', 0.0, 0.3)          # TCN Dropout
-    # tcn_channel_list = [tcn_channels] * tcn_layers
 
     # 近端梯度下降和稀疏性参数
     loss_functions_list = {
@@ -88,13 +86,10 @@ def objective(trial, logger):
     lambda_reg = trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True) # 正则化惩罚项在总损失函数中的整体权重或强度
     # penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL']) # 惩罚类型
     penalty_type = 'GL' # 惩罚类型
-    # alpha_gsgl = 0.5 # 仅在GSGL的情况下才有意义，负责控制GSGL内部组稀疏和组内稀疏的平衡
-    # if penalty_type == 'GSGL':
-    #     alpha_gsgl = trial.suggest_float('alpha_gsgl', 0.1, 0.9)
 
     print(f"\n--- Trial {trial.number} ---")
-    print(f"  CausalFormer 参数: input_window={input_window}, d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
-    print(f"  GrangerTCN 参数: layers={tcn_layers}, channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}, loss_function={loss_function_name}")
+    print(f"  CausalFormer 参数: input_window={INPUT_WINDOW}, d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
+    print(f"  GrangerTCN 参数: channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}, loss_function={loss_function_name}")
     print(f"  优化参数: lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}")
 
     # --- 模型和损失函数 ---
@@ -126,9 +121,6 @@ def objective(trial, logger):
     # --- 近端优化训练循环 ---
     final_val_auroc = 0.0 # 仍然计算 AUROC 用于记录，但不是优化目标
     final_avg_val_mse = float('inf')
-
-    # 查找需要正则化的参数对象，这个路径取决于 PredictModel -> Encoder -> EncoderLayer -> MultiHeadAttention -> GrangerTCN -> TemporalBlock -> conv1
-    # granger_weights_param = model.encoder.layers[0].attention.tcn_processor.network_layers[0].conv1.weight
 
     # ---开始训练---
     causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, criterion=criterion,lr=lr, device=DEVICE,

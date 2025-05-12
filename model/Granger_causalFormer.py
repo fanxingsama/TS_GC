@@ -114,36 +114,34 @@ class MultiHeadAttention(nn.Module):
         self.tau = tau
         self.device = device
 
-        self.Wq = Linear(in_features=self.d_model, out_features=self.d_model, bias=True)
-        self.Wk = Linear(in_features=self.d_model, out_features=self.d_model, bias=True)
-        self.Wq.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model)))
-        self.Wk.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model)))
+        self.Wq = Linear(in_features=self.d_model, out_features=self.d_model, bias=True) # 将输入特征投影到不同的表示空间，加入线性之后方便训练W矩阵
+        self.Wk = Linear(in_features=self.d_model, out_features=self.d_model, bias=True) 
+        self.Wq.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model))) # He 初始化
+        self.Wk.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.d_model))) # He 初始化
 
         # V的处理，为每个时间序列创建单独的TCN
         self.tcn_processors = nn.ModuleList()
         for i in range(self.series_num):
-            # 每个TCN的输入是除了目标序列之外的所有序列 (series_num - 1)
-            tcn_input_size = self.series_num - 1
-            tcn_output_size = tcn_channels  # 使用相同的输出通道数
-            
             self.tcn_processors.append(
-                GrangerTCN(input_size=tcn_input_size,
-                          output_size=tcn_output_size,
-                          num_channels=tcn_channels,
-                          kernel_size=tcn_kernel_size,
+                GrangerTCN(input_size=self.series_num - 1, # 每个TCN的输入是除了目标序列之外的所有序列 (series_num - 1)
+                          output_size=tcn_channels, # TCN所提取到的特征数
+                          TCN_hidden_channels=tcn_channels, # TCN中间层的通道数
+                          kernel_size=tcn_kernel_size, 
                           dropout=tcn_dropout)
             )
 
-        self.v_feature_dim = self.d_model
-        self.Wv_proj = Linear(tcn_channels, self.v_feature_dim)
-        self.Wv_proj.weight.data.normal_(0, math.sqrt(2.0 / (tcn_channels + self.v_feature_dim)))
+        # 线性层，用于将TCN的输出output_size投影到与d_model相同的维度，便于之后的注意力计算
+        self.Wv = Linear(in_features=tcn_channels, out_features=self.d_model)
+        self.Wv.weight.data.normal_(0, math.sqrt(2.0 / (tcn_channels + self.d_model)))
         
         # 构建注意力对象
-        self.attention = MultiVariateCausalAttention(self.d_tensor, self.tau)
+        self.count_attention = MultiVariateCausalAttention(self.d_tensor, self.tau)
 
-        self.w_concat = Linear(in_features=self.v_feature_dim, out_features=self.feature_dim, bias=False)
-        self.w_concat.weight.data.normal_(0, math.sqrt(2.0 / (self.v_feature_dim + self.feature_dim)))
+        # 线性层，用于将多头注意力的输出拼接回原始维度
+        self.w_concat = Linear(in_features=self.d_model, out_features=self.feature_dim, bias=False)
+        self.w_concat.weight.data.normal_(0, math.sqrt(2.0 / (self.d_model + self.feature_dim)))
 
+    # 将输入张量拆分为多个头，以便进行多头注意力计算
     def split(self, tensor):
         batch_size = tensor.size(0)
         if tensor.ndim == 3: # Q, K: [B, N, D]
@@ -154,16 +152,15 @@ class MultiHeadAttention(nn.Module):
         elif tensor.ndim == 4: # V: [B, N, T, Fv]
             n_series, seq_len, f_v = tensor.size(1), tensor.size(2), tensor.size(3)
             fv_head = f_v // self.n_head
-            # Use reshape instead of view after permute for safety
             tensor = tensor.view(batch_size, n_series, seq_len, self.n_head, fv_head).permute(0, 3, 1, 2, 4).contiguous() # Add contiguous()
         else:
             raise ValueError(f"Unsupported tensor ndim for split: {tensor.ndim}")
         return tensor
 
+    # 将多个头的输出张量连接在一起，以便进行后续处理
     def concat(self, tensor):
         batch_size, head, n_series, seq_len, fv_head = tensor.size()
         f_v = head * fv_head
-        # Use reshape instead of view after permute for safety
         tensor = tensor.permute(0, 2, 3, 1, 4).contiguous().view(batch_size, n_series, seq_len, f_v) # Add contiguous() before view
         return tensor
 
@@ -177,9 +174,9 @@ class MultiHeadAttention(nn.Module):
             torch.Tensor: 多头注意力的输出 [batch_size, series_num, input_window, feature_dim]。
         """
         batch_size = x_input.size(0)
-        q, k = self.Wq(q_emb), self.Wk(k_emb)
+        q, k = self.Wq(q_emb), self.Wk(k_emb) # Q和K的线性变换
 
-        # --- V 处理：为每个时间序列使用单独的TCN ---
+        # 如果特征维度大于1，则只取第一个特征维度作为 TCN 的输入，如果特征维度为1，则直接去掉最后一个维度
         if self.feature_dim > 1:
             x_tcn_input = x_input[:, :, :, 0]  # [B, N, T]
         else:
@@ -188,6 +185,7 @@ class MultiHeadAttention(nn.Module):
         # 存储每个序列的TCN输出
         all_tcn_outputs = []
         
+        # 对于每个时间序列（series_num），使用一个单独的 TCN 处理除了目标序列之外的所有序列。
         for i in range(self.series_num):
             # 将所有除了目标序列之外的序列作为输入
             mask = torch.ones(self.series_num, dtype=torch.bool, device=self.device)
@@ -206,17 +204,16 @@ class MultiHeadAttention(nn.Module):
         # 调整维度顺序以便后续处理
         tcn_output = stacked_outputs.permute(0, 3, 1, 2)  # [B, T, N, C_tcn]
         
-        # 投影到V空间
-        v_projected = self.Wv_proj(tcn_output)  # [B, T, N, v_feature_dim]
-        v = v_projected.permute(0, 2, 1, 3)  # -> [B, N, T, v_feature_dim]
+        # 使用线性层 Wv 将 TCN 的输出投影到与 d_model 相同的维度。
+        v_temp = self.Wv(tcn_output)  # [B, T, N, d_model]
+        v = v_temp.permute(0, 2, 1, 3)  # 维度顺序调整，[B, N, T, d_model]
 
-        q, k = self.split(q), self.split(k)
-        v = self.split(v)
+        q, k, v = self.split(q), self.split(k), self.split(v) # 将Q、K、V拆分为多头，以便进行多头注意力计算
 
-        out, attn_weights = self.attention(q, k, v)
+        out, attn_weights = self.count_attention(q, k, v) # 计算多头注意力
 
-        out = self.concat(out)
-        out = self.w_concat(out)
+        out = self.concat(out) # 将多头注意力的输出拼接回原始维度，[batch_size, series_num, input_window, d_model]
+        out = self.w_concat(out) # 使用线性层将输出投影到特征维度，[batch_size, series_num, input_window, feature_dim]
 
         return out
 
@@ -383,7 +380,7 @@ class PredictModel(nn.Module):
             nn.init.constant_(self.fc.bias, 0)
 
     def forward(self, x):
-        # x = [batch_size, input_window, series_num, feature_dim]
+        # x = [batch_size, input_window, series_num, feature_dim] √
         x = x.permute(0, 2, 1, 3)  # [batch_size, series_num, input_window, feature_dim]
         encoder_out = self.encoder(x) # [batch_size, series_num, input_window, feature_dim]
         last_step_out = encoder_out[:, :, -1, :] # [batch_size, series_num, feature_dim]
@@ -392,53 +389,3 @@ class PredictModel(nn.Module):
         if self.output_window > 1:
             out = out.repeat(1, self.output_window, 1, 1)
         return out
-
-    # def get_GC(self, threshold=True, ignore_lag=True):
-    #     GC_list_from_each_encoder_first_block = []
-    #     for encoder_layer in self.encoder.layers:  # 遍历 EncoderLayer 实例
-    #         tcn_processor = encoder_layer.attention.tcn_processor  # 这是一个 GrangerTCN 实例
-            
-    #         if tcn_processor.network_layers:  # 检查 TCN 是否有 TemporalBlock
-    #             # 我们只关心 TCN 的第一个 TemporalBlock，因为它的输入直接对应 P 个原始序列
-    #             first_temporal_block = tcn_processor.network_layers[0]
-                
-    #             # first_temporal_block.conv1.weight 的形状是:
-    #             # [out_channels_C1, in_channels_P, kernel_size_K_tcn]
-    #             # 其中 in_channels_P 是 self.series_num (原始序列数)
-                
-    #             current_norm = None
-    #             if ignore_lag:
-    #                 # 计算范数时，聚合 out_channels (dim 0) 和 kernel_size (dim 2)
-    #                 # 得到每个输入序列 (in_channels_P) 的一个标量影响值
-    #                 # 结果形状: [in_channels_P]
-    #                 current_norm = torch.norm(first_temporal_block.conv1.weight, dim=(0, 2))
-    #             else:
-    #                 # 计算范数时，只聚合 out_channels (dim 0)
-    #                 # 保留了 kernel_size 维度，表示每个输入序列在不同卷积核位置（滞后）的影响
-    #                 # 结果形状: [in_channels_P, kernel_size_K_tcn]
-    #                 current_norm = torch.norm(first_temporal_block.conv1.weight, dim=0)
-                
-    #             GC_list_from_each_encoder_first_block.append(current_norm)
-
-    #     if not GC_list_from_each_encoder_first_block:
-    #         # 如果没有 encoder layer 或 TCN block，返回一个空张量
-    #         # 或者可以根据 series_num 和 tcn_kernel_size 返回特定形状的零张量
-    #         # 例如: return torch.zeros(0, self.series_num).to(self.device) if ignore_lag else torch.zeros(0, self.series_num, self.config['model']['args']['tcn_kernel_size']).to(self.device)
-    #         return torch.empty(0, device=self.device)
-
-
-    #     # GC_list_from_each_encoder_first_block 中的所有张量现在都具有相同的形状:
-    #     #   - 如果 ignore_lag=True: [series_num]
-    #     #   - 如果 ignore_lag=False: [series_num, tcn_kernel_size]
-        
-    #     # 将来自每个 encoder layer 的 GC 张量堆叠起来
-    #     # dim=0 表示将它们堆叠成一个新的第0维度 (num_encoder_layers)
-    #     GC_stacked = torch.stack(GC_list_from_each_encoder_first_block, dim=0)
-    #     # GC_stacked 的形状:
-    #     #   - 如果 ignore_lag=True: [num_encoder_layers, series_num]
-    #     #   - 如果 ignore_lag=False: [num_encoder_layers, series_num, tcn_kernel_size]
-
-    #     if threshold:
-    #         return (GC_stacked > 0).int()
-    #     else:
-    #         return GC_stacked

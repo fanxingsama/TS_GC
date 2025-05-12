@@ -226,7 +226,6 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
     loss_fn = nn.MSELoss(reduction='mean')
     lr_list = [lr for _ in range(p)] # 每个网络的学习率列表
 
-    # Calculate full loss.
     mse_list = []
     smooth_list = []
     loss_list = []

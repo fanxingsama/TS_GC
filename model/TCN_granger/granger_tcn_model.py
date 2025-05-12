@@ -26,7 +26,7 @@ class TemporalBlock(nn.Module):
         """
         Args:
             n_inputs (int): 输入通道数。
-            n_outputs (int): 输出通道数。
+            n_outputs (int): 卷积后想从数据中得到多少个不同的特征。
             kernel_size (int): 卷积核大小。
             stride (int): 卷积步长。
             dilation (int): 卷积膨胀系数。
@@ -89,25 +89,25 @@ class TemporalBlock(nn.Module):
         return self.relu(out + res)
 
 class GrangerTCN(nn.Module):
-    def __init__(self, input_size, output_size, num_channels, kernel_size=3, dropout=0.2):
+    def __init__(self, input_size, output_size, TCN_hidden_channels, kernel_size=3, dropout=0.2):
         """
         Args:
-            input_size (int): 输入通道数，代表除了目标时间序列外的其他序列数量 (n-1)。
+            input_size (int): 输入的时序序列的数量，代表除了目标时间序列外的其他序列数量 (n-1)。
             output_size (int): 输出通道数，对应最终的输出维度。
-            num_channels (int): 每个 TemporalBlock 的隐藏通道数，卷积的时候从数据中提取到的特征数量。
+            TCN_hidden_channels (int or list): 每个 TemporalBlock 的输出通道数，，如果有超过2个卷积块，就应该是个list，[tcn_channels, tcn_channels, ...]，表示每一层卷积块的输出维度和下一层的输入维度。
+            若 TCN_hidden_channels 设计为递增（如 [32, 64, 128]），深层块能捕捉更复杂的模式，但需通过跳跃连接中的 1x1 卷积对齐输入输出维度。这会增加参数量和计算成本，但可能提升模型表达能力。
+            
             kernel_size (int): 卷积核大小。
             dropout (float): Dropout 比率。
         """
         super(GrangerTCN, self).__init__()
-
-        # 固定使用2个TCN-block
         self.network_layers = nn.ModuleList()
         
         # 第一个 TemporalBlock
         dilation_size = 1  # 第一个block的膨胀系数为1
         padding = (kernel_size - 1) * dilation_size
         self.network_layers.append(
-            TemporalBlock(input_size, num_channels, kernel_size, stride=1,
+            TemporalBlock(input_size, TCN_hidden_channels, kernel_size, stride=1,
                           dilation=dilation_size,
                           padding=padding,
                           dropout=dropout)
@@ -117,7 +117,8 @@ class GrangerTCN(nn.Module):
         dilation_size = 2  # 第二个block的膨胀系数为2
         padding = (kernel_size - 1) * dilation_size
         self.network_layers.append(
-            TemporalBlock(num_channels, output_size, kernel_size, stride=1,
+            # 通过隐藏通道数个特征，提取到output_size个特征
+            TemporalBlock(TCN_hidden_channels, output_size, kernel_size, stride=1,
                           dilation=dilation_size,
                           padding=padding,
                           dropout=dropout)
