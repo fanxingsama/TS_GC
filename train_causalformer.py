@@ -1,3 +1,4 @@
+import os
 import torch
 from model.TCN_granger.granger_utils import (
     lasso_penalty,
@@ -8,13 +9,14 @@ import matplotlib.pyplot as plt
 
 
 class CausalFormerTrainer:
-    def __init__(self, model, epoch, criterion, lr, device, series_num,
+    def __init__(self, model, epoch, save_dir, criterion, lr, device, series_num,
                 train_loader, valid_loader, penalty_type, lambda_reg, 
                 lambda_ridge=0.01, check_every=5, r=0.8, lr_min=1e-8, 
                 sigma=0.5, monotone=False, m=10, lr_decay=0.5,
                 begin_line_search=True, switch_tol=1e-3, verbose=1):
         self.model = model
         self.epochs = epoch
+        self.save_dir = save_dir
         self.criterion = criterion  # 主MSE损失函数
         self.lr = lr
         self.device = device
@@ -51,20 +53,16 @@ class CausalFormerTrainer:
     def train_epoch(self):
         self.model.train()
         
-        # 获取所有TCN的第一层权重参数
         tcn_first_layers = []
         tcn_first_layer_names = []
-        for i in range(self.series_num):
+        for i in range(self.series_num): # 获取所有TCN的第一层权重参数
             layer_name = f"encoder.layers.0.attention.tcn_processors.{i}.network_layers.0.conv1.weight"
             layer = self.model.encoder.layers[0].attention.tcn_processors[i].network_layers[0].conv1.weight
             tcn_first_layers.append(layer)
             tcn_first_layer_names.append(layer_name)
         
-        # 创建模型的深拷贝用于线搜索
         model_copy = deepcopy(self.model)
-        
-        # 初始化每个TCN的学习率列表
-        lr_list = [self.lr for _ in range(self.series_num)]
+        lr_list = [self.lr for _ in range(self.series_num)]# 初始化每个TCN的学习率列表
         
         # 线搜索标志
         line_search = self.begin_line_search
@@ -387,9 +385,9 @@ class CausalFormerTrainer:
                 print(f"在第{epoch}轮触发早停，模型的最终总损失：{val_loss}")
                 break
             
-            # 绘制训练和验证损失曲线
-            self.plot_training_curves(train_losses, train_mses, train_ridges, train_penalties,
-                                  val_losses, val_mses, val_ridges, val_penalties)
+        # 绘制训练和验证损失曲线
+        self.plot_training_curves(train_losses, train_mses, train_ridges, train_penalties,
+                                val_losses, val_mses, val_ridges, val_penalties)
                 
         return self.best_loss_result
     
@@ -434,4 +432,7 @@ class CausalFormerTrainer:
         plt.legend()
 
         plt.tight_layout()
+        save_path = os.path.join(self.save_dir, 'training_model.png')
+        plt.savefig(save_path)
+        
         plt.show()

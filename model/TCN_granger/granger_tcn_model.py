@@ -37,14 +37,14 @@ class TemporalBlock(nn.Module):
         # 第一个卷积层
         self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
                                stride=stride, padding=padding, dilation=dilation)
-        self.chomp1 = Chomp1d(padding) # 裁剪以确保因果性
+        self.chomp1 = Chomp1d(padding)
         self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(dropout)
 
         # 第二个卷积层
         self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
                                stride=stride, padding=padding, dilation=dilation)
-        self.chomp2 = Chomp1d(padding) # 裁剪以确保因果性
+        self.chomp2 = Chomp1d(padding)
         self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(dropout)
 
@@ -58,7 +58,7 @@ class TemporalBlock(nn.Module):
         self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.relu = nn.ReLU()
         # 初始化权重（可选，但通常是好的实践）
-        self.init_weights()
+        self.init_weights() 
 
     def init_weights(self):
         """初始化卷积层的权重。"""
@@ -76,20 +76,17 @@ class TemporalBlock(nn.Module):
              if self.downsample.bias is not None:
                 nn.init.constant_(self.downsample.bias, 0)
 
-
     def forward(self, x):
-        """
-        Args:
-            x (torch.Tensor): 输入张量，形状 [batch, channels, time]。
-        Returns:
-            torch.Tensor: TemporalBlock 的输出，形状 [batch, out_channels, time]。
-        """
-        out = self.net(x)
+        out = self.net(x) # x: [batch_size, series_num, sequence_length]
+        '''
+        输入通道数和输出通道数相同时，直接使用输入张量 x 作为残差连接。
+        输入通道数和输出通道数不同时，通过 1x1 卷积层对输入张量进行通道调整，以确保残差连接的输出张量的通道数与卷积层的输出通道数一致。
+        '''
         res = x if self.downsample is None else self.downsample(x)
-        return self.relu(out + res)
+        return self.relu(out + res) # [batch_size, n_outputs, sequence_length]
 
 class GrangerTCN(nn.Module):
-    def __init__(self, input_size, output_size, TCN_hidden_channels, kernel_size=3, dropout=0.2):
+    def __init__(self, input_series_num, output_size, TCN_hidden_channels, kernel_size=3, dropout=0.2):
         """
         Args:
             input_size (int): 输入的时序序列的数量，代表除了目标时间序列外的其他序列数量 (n-1)。
@@ -107,7 +104,7 @@ class GrangerTCN(nn.Module):
         dilation_size = 1  # 第一个block的膨胀系数为1
         padding = (kernel_size - 1) * dilation_size
         self.network_layers.append(
-            TemporalBlock(input_size, TCN_hidden_channels, kernel_size, stride=1,
+            TemporalBlock(input_series_num, TCN_hidden_channels, kernel_size, stride=1,
                           dilation=dilation_size,
                           padding=padding,
                           dropout=dropout)
@@ -127,15 +124,7 @@ class GrangerTCN(nn.Module):
         return self.network_layers[0].conv1.weight
 
     def forward(self, x):
-        """
-        Args:
-            x: 输入张量，形状为 [batch_size, input_size, sequence_length]。
-        Returns:
-            输出张量，是最后一个 TCN 块的完整序列输出。
-            形状为 [batch_size, num_channels_last_block, sequence_length]。
-        """
-        # 将输入传递给所有 TCN 块
+        # x：[batch_size, series_num, sequence_length]
         for layer in self.network_layers:
             x = layer(x)
-
-        return x
+        return x  # [batch_size, output_feature, sequence_length]

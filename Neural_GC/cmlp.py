@@ -252,7 +252,6 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
     # 线搜索
     line_search = begin_line_search
 
-    # For line search criterion.
     done = [False for _ in range(p)] # 记录每个网络是否已经收敛
     # 声明线搜索参数
     assert 0 < sigma <= 1

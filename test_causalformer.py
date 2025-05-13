@@ -179,7 +179,6 @@ def main(png_save_path):
     # 获取数据加载器和序列数量
     _, _, test_loader = timeseriesDataLoader.split_sampler()
     series_num = timeseriesDataLoader.series_num
-    GC_true_np = timeseriesDataLoader.get_true_granger()
     
     print(f"时间序列数量: {series_num}")
     print(f"测试集数据大小: {len(test_loader.dataset)}")

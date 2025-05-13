@@ -37,11 +37,12 @@ OUTPUT_DIM = 1  # 每个时间序列在每个预测时间步上输出的目标�
 
 
 # --- 训练和 Optuna 参数 ---
-EPOCHS = 10
+EPOCHS = 30
 BATCH_SIZE = 128
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 N_TRIALS = 50 # Optuna 的试验次数
 STUDY_NAME = "optuna"
+STORAGE_PATH = f"sqlite:///{STUDY_NAME}.db"
 
 
 # --- 1. 生成并预处理数据 ---
@@ -54,23 +55,22 @@ true_gc_path = 'data/fMRI/sim9_gt_processed.csv'
 
 timeseriesDataLoader = TimeSeriesDataloader(data_dir=data_path, gc_dir=true_gc_path, batch_size=BATCH_SIZE, 
                                             DATA_SEED=DATA_SEED, input_window=INPUT_WINDOW, output_window=OUTPUT_WINDOW)
-GC_true_np = timeseriesDataLoader.get_true_granger() # 得到真实的格兰杰因果矩阵
 train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
 series_num = timeseriesDataLoader.series_num # 获取序列数量
 # --- 2. 定义 Optuna 目标函数 ---
-def objective(trial, logger):
-    global GC_true_np,  FEATURE_DIM, OUTPUT_DIM
+def objective(trial, logger, save_dir):
+    global FEATURE_DIM, OUTPUT_DIM
     
     # CausalFormer 参数
-    d_model = trial.suggest_categorical('d_model', [32, 64, 128])       # QK 嵌入维度
+    d_model = trial.suggest_categorical('d_model', [32, 64, 128, 256])       # QK 嵌入维度
     n_head = trial.suggest_categorical('n_head', [2, 4, 8])             # 注意力头数
     n_layers = trial.suggest_int('n_layers', 1, 3)                      # Encoder 层数
-    ffn_hidden = trial.suggest_categorical('ffn_hidden', [64, 128, 256])# FFN 隐藏层维度
+    ffn_hidden = trial.suggest_categorical('ffn_hidden', [64, 128, 256, 512])# FFN 隐藏层维度
     dropout = trial.suggest_float('dropout', 0.0, 0.3)                  # Dropout
-    tau = trial.suggest_float('tau', 0.5, 10.0, log=True)               # Softmax 温度
+    tau = trial.suggest_float('tau', 0.5, 100.0, log=True)               # Softmax 温度
 
     # GrangerTCN 参数
-    tcn_channels = trial.suggest_categorical('tcn_channels', [16, 32, 48]) # TCN 通道数
+    tcn_channels = trial.suggest_categorical('tcn_channels', [32, 64, 128, 256]) # TCN 通道数
     tcn_kernel_size = trial.suggest_categorical('tcn_kernel_size', [2, 3, 4]) # TCN 核大小
     tcn_dropout = trial.suggest_float('tcn_dropout', 0.0, 0.3)          # TCN Dropout
 
@@ -88,9 +88,9 @@ def objective(trial, logger):
     penalty_type = 'GL' # 惩罚类型
 
     print(f"\n--- Trial {trial.number} ---")
-    print(f"  CausalFormer 参数: input_window={INPUT_WINDOW}, d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
-    print(f"  GrangerTCN 参数: channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}, loss_function={loss_function_name}")
-    print(f"  优化参数: lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}")
+    print(f"  CausalFormer 参数:d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
+    print(f"  GrangerTCN 参数: channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}")
+    print(f"  训练参数: loss_function={loss_function_name},criterion={criterion}, lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}")
 
     # --- 模型和损失函数 ---
     # 创建配置字典传递给 PredictModel
@@ -119,29 +119,29 @@ def objective(trial, logger):
                          tau=tau).to(DEVICE)
 
     # --- 近端优化训练循环 ---
-    final_val_auroc = 0.0 # 仍然计算 AUROC 用于记录，但不是优化目标
-    final_avg_val_mse = float('inf')
+    final_avg_val_loss = float('inf')
 
     # ---开始训练---
-    causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, criterion=criterion,lr=lr, device=DEVICE,
+    causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
                                                train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
                                                penalty_type=penalty_type, lambda_reg=lambda_reg)
-    final_avg_val_mse = causalFormerTrainer.train()
+    final_avg_val_loss = causalFormerTrainer.train()
+    logger.info(f"Trial {trial.number} 完成。最终验证集 loss: {final_avg_val_loss:.6f}")
 
-    logger.info(f"Trial {trial.number} 完成。最终验证集 AUROC: {final_val_auroc:.4f}, 最终验证集 MSE: {final_avg_val_mse:.6f}")
-    # 返回最终验证集 MSE 给 Optuna
-    return final_avg_val_mse if np.isfinite(final_avg_val_mse) else float('inf')
+    return final_avg_val_loss
 
 def begin_optuna(save_dir, logger):
     # --- 3. 创建或加载 Optuna Study 并运行优化 ---
     study = optuna.create_study(
         study_name=STUDY_NAME,
+        storage=STORAGE_PATH,
+        load_if_exists=True,
         direction='minimize' # 修改优化目标为最小化
     )
     optuna.logging.set_verbosity(optuna.logging.WARNING) # 设置 Optuna 的日志级别为警告级别
 
     print(f"\n开始 Optuna 超参数优化") # 更新打印信息
-    objective_with_logger = functools.partial(objective, logger=logger)
+    objective_with_logger = functools.partial(objective, logger=logger, save_dir = save_dir)
     study.optimize(objective_with_logger, n_trials=N_TRIALS, timeout=None)
 
     # --- 4. 输出结果 ---
