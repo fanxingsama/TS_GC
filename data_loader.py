@@ -24,8 +24,8 @@ class TimeSeriesDataloader():
         self.series_num = self.df_a.shape[1] # 获取序列数量
         
         X_np = self.df_a.values  # 获取所有的数据点
-        scaler = preprocessing.MinMaxScaler(feature_range=(0, 1)) # 归一化
-        X_np = scaler.fit_transform(X_np)
+        self.scaler = preprocessing.MinMaxScaler(feature_range=(0, 1)) # 归一化
+        X_np = self.scaler.fit_transform(X_np)
 
         # T：时间序列数量，P：时间序列长度
         self.X_np = X_np[:, :, np.newaxis] # 给序列增加一个新的维度，最后一个维度是序列的特征数量，X_np表示每一个序列的形状: [series_len, series_num, 1]
@@ -61,6 +61,41 @@ class TimeSeriesDataloader():
         
         # 返回训练集和验证集的采样器
         return train_loader, val_loader, test_loader # [batch_size, num_samples, input_window, series_num, feature_num]
+    
+    def inverse_transform(self, data):
+        """
+        将归一化后的数据转换回原始尺度
+        
+        参数:
+        - data: 形状为 [batch_size, output_window, series_num, feature_dim] 的数据
+            或 [samples, output_window, series_num, feature_dim] 的numpy数组
+            
+        返回:
+        - 转换回原始尺度的数据
+        """
+        batch_size = data.shape[0]
+        output_window = data.shape[1]
+        series_num = data.shape[2]
+        feature_dim = data.shape[3]
+        
+        # 重塑数据以适应scaler的输入格式 [sample, features]
+        # 我们需要将形状从 [batch_size, output_window, series_num, feature_dim] 改变为 [batch_size*output_window, series_num]
+        data_reshaped = data.reshape(batch_size * output_window, series_num, feature_dim).squeeze(-1)
+        
+        # 应用inverse_transform
+        if isinstance(data, torch.Tensor):
+            data_reshaped_np = data_reshaped.cpu().numpy()
+            inverse_data = self.scaler.inverse_transform(data_reshaped_np)
+            # 重塑回原始维度
+            inverse_data = inverse_data.reshape(batch_size, output_window, series_num)
+            inverse_data = np.expand_dims(inverse_data, -1)  # 添加feature_dim维度
+            return inverse_data
+        else:  # 如果已经是numpy数组
+            inverse_data = self.scaler.inverse_transform(data_reshaped)
+            # 重塑回原始维度
+            inverse_data = inverse_data.reshape(batch_size, output_window, series_num)
+            inverse_data = np.expand_dims(inverse_data, -1)  # 添加feature_dim维度
+            return inverse_data
         
 # --- 辅助函数：创建序列 (适配 CausalFormer 输入输出) ---
 def create_sequences(data, input_window, output_window): # data:  [series_len, series_num, feature_num]。

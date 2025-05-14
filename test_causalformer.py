@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import joblib
+from sklearn import preprocessing
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,6 +11,8 @@ from matplotlib import rcParams
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
+import pandas as pd
+import os
 
 # 设置 Matplotlib 中文显示
 rcParams['font.family'] = 'SimHei'
@@ -50,13 +53,15 @@ def load_model(config, best_params, device):
     return model
 
 # 评估模型
-def evaluate_model(model, test_loader, device, series_num, max_samples=100):
+def evaluate_model(model, test_loader, device, series_num, dataloader, max_samples=100):
     model.eval()
     
     # 用于存储结果的字典
     results = {
         'predictions': [], # 模型预测值
         'targets': [], # 数据集真实值
+        'predictions_original_scale': [], # 反归一化后的预测值
+        'targets_original_scale': [], # 反归一化后的真实值
         'mse_per_series': [],
         'mae_per_series': [],
         'r2_per_series': []
@@ -84,11 +89,15 @@ def evaluate_model(model, test_loader, device, series_num, max_samples=100):
     results['predictions'] = np.concatenate(results['predictions'], axis=0)[:max_samples]
     results['targets'] = np.concatenate(results['targets'], axis=0)[:max_samples]
     
-    # 计算每个时间序列的评估指标
+    # 反归一化预测和目标数据
+    results['predictions_original_scale'] = dataloader.inverse_transform(results['predictions'])
+    results['targets_original_scale'] = dataloader.inverse_transform(results['targets'])
+    
+    # 计算每个时间序列的评估指标（使用原始尺度的数据计算指标）
     for i in range(series_num):
-        # 得到当前序列的预测值和真实值
-        pred_series = results['predictions'][:, 0, i, 0]  # [samples, output_window=1, series_num, output_dim=1]
-        target_series = results['targets'][:, 0, i, 0]
+        # 得到当前序列的预测值和真实值（使用原始尺度）
+        pred_series = results['predictions_original_scale'][:, 0, i, 0]  # [samples, output_window=1, series_num, output_dim=1]
+        target_series = results['targets_original_scale'][:, 0, i, 0]
         
         # 计算指标
         mse = mean_squared_error(target_series, pred_series)
@@ -101,10 +110,50 @@ def evaluate_model(model, test_loader, device, series_num, max_samples=100):
     
     return results
 
-# 获得 模型的Granger 因果关系
-# def get_GC_and_save(model, threshold=True, ignore_lag=True):
-#     GC = model.get_GC(threshold=True, ignore_lag=True)
+# 保存模型的格兰杰因果关系矩阵到 CSV 文件
+def save_gc_to_csv(model, series_num, path, threshold=True, ignore_kernel=True):
+    """
+    Args:
+        path (str): CSV 文件的保存路径
+        threshold (bool): 是否使用阈值化的结果
+        ignore_kernel (bool): 是否忽略核大小维度
+    """
+
+    # 获取 GC 矩阵
+    gc_matrix = model.GC(threshold=threshold, ignore_kernel=ignore_kernel)
     
+    if ignore_kernel: # 忽略滞后
+        cause_effect_pairs = [] 
+        for effect_idx in range(series_num): # 果
+            for cause_idx in range(series_num): # 因
+                if effect_idx != cause_idx:  # 可选：排除自因果
+                    strength = gc_matrix[effect_idx, cause_idx].item() # 因果关系强度
+                    # 如果需要阈值化结果，只保存非零项
+                    if not threshold or (threshold and strength > 0):
+                        cause_effect_pairs.append({
+                            'source': f'{cause_idx}',
+                            'target': f'{effect_idx}',
+                            'Strength': strength
+                        })
+        df = pd.DataFrame(cause_effect_pairs)
+        
+    else:
+        cause_effect_pairs = []
+        for effect_idx in range(series_num):
+            for cause_idx in range(series_num):
+                if effect_idx != cause_idx:  # 可选：排除自因果
+                    for lag in range(gc_matrix.shape[2]):
+                        strength = gc_matrix[effect_idx, cause_idx, lag].item()
+                        # 如果需要阈值化结果，只保存非零项
+                        if not threshold or (threshold and strength > 0):
+                            cause_effect_pairs.append({
+                                'Cause': f'Series_{cause_idx}',
+                                'Effect': f'Series_{effect_idx}',
+                                'lag': lag,
+                                'Strength': strength
+                            })
+        df = pd.DataFrame(cause_effect_pairs)
+    df.to_csv(path, index=False)
 
 # 绘制预测结果和真实值的时序序列对比图
 def plot_predictions(results, series_num, plot_indices, save_path=None):
@@ -120,7 +169,7 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
         plot_indices = list(range(min(5, series_num)))
     
     # 获取样本数
-    n_samples = results['predictions'].shape[0]
+    n_samples = results['predictions_original_scale'].shape[0]
     time_steps = np.arange(n_samples)
     
     # 创建足够大的图表
@@ -130,9 +179,9 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
     for i, idx in enumerate(plot_indices):
         plt.subplot(len(plot_indices), 1, i + 1)
         
-        # 提取当前序列的预测和真实值
-        pred_series = results['predictions'][:, 0, idx, 0]  # [samples, output_window=1, series_idx, output_dim=1]
-        target_series = results['targets'][:, 0, idx, 0]
+        # 提取当前序列的预测和真实值（使用原始尺度的数据）
+        pred_series = results['predictions_original_scale'][:, 0, idx, 0]  # [samples, output_window=1, series_idx, output_dim=1]
+        target_series = results['targets_original_scale'][:, 0, idx, 0]
         
         # 绘制曲线
         plt.plot(time_steps, target_series, 'b-', label='真实值', linewidth=2)
@@ -200,8 +249,8 @@ def main(png_save_path):
     }
     model = load_model(config, best_params, device) # 构建模型
     
-    # 评估模型
-    results = evaluate_model(model, test_loader, device, series_num, max_samples=100)
+    # 评估模型 - 传入数据加载器以便进行反归一化
+    results = evaluate_model(model, test_loader, device, series_num, timeseriesDataLoader, max_samples=100)
     
     # 计算总体指标
     overall_mse = np.mean(results['mse_per_series'])
@@ -213,6 +262,9 @@ def main(png_save_path):
     print(f"平均 MAE: {overall_mae:.6f}")
     print(f"平均 R²: {overall_r2:.6f}")
     
+    # 得到格兰杰因果关系
+    save_gc_to_csv(model, series_num, png_save_path / "granger_causal_matrix.csv", threshold=True, ignore_kernel=True)
+    
     # 绘制预测结果
     print("\n绘制预测结果...")
     # 选择前5个序列进行绘制
@@ -220,7 +272,6 @@ def main(png_save_path):
     plot_predictions(results, series_num, plot_indices, save_path= png_save_path / "model_predict.png")
 
 if __name__ == "__main__":
-    run_id = "05-12_12-46-34"  # 
+    run_id = "05-14_09-23-00"  # 
     png_save_path = Path('saved') / run_id
     main(png_save_path)
-    

@@ -90,7 +90,7 @@ def objective(trial, logger, save_dir):
     print(f"\n--- Trial {trial.number} ---")
     print(f"  CausalFormer 参数:d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
     print(f"  GrangerTCN 参数: channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}")
-    print(f"  训练参数: loss_function={loss_function_name},criterion={criterion}, lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}")
+    print(f"  训练参数: loss_function={loss_function_name}, lr={lr:.6f}, lambda_reg={lambda_reg:.6f}, penalty={penalty_type}")
 
     # --- 模型和损失函数 ---
     # 创建配置字典传递给 PredictModel
@@ -181,7 +181,6 @@ def matplot_optuna(completed_trials, best_trial, save_dir):
     plt.legend()
     plt.tight_layout()
     plt.savefig(save_dir / 'optuna_history.png') # 保存图像
-    print(f"\noptuna_history.png")
 
 def main(run_id):
     # 设置记录器

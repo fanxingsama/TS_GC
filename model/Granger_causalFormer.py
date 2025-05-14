@@ -367,3 +367,30 @@ class PredictModel(nn.Module):
         if self.output_window > 1:
             out = out.repeat(1, self.output_window, 1, 1)
         return out # [batch_size, output_window, series_num, output_dim]
+    
+    def GC(self, threshold=True, ignore_kernel=True):
+        gc_weights = []
+        
+        for i in range(self.series_num):
+            weights = self.encoder.layers[0].attention.tcn_processors[i].get_first_block_conv1_weights() # [output_channels, input_channels, kernel_size]
+            full_weights = torch.zeros(self.series_num, *weights.shape[1:], device=weights.device) # 目标序列的完整因果矩阵
+            
+            # 填充除了目标序列之外的所有序列的权重
+            mask = torch.ones(self.series_num, dtype=torch.bool, device=weights.device)
+            mask[i] = False # 排除目标序列
+            full_weights[mask] = weights.reshape(-1, *weights.shape[1:]) # 使用 mask 将权重 weights 填充到 full_weights 中，排除目标序列自身。
+            if ignore_kernel:
+                # 计算跨输出通道和卷积核大小维度的范数
+                series_gc = torch.norm(full_weights, dim=(1, 2))
+            else:
+                # 计算仅跨输出通道维度的范数
+                series_gc = torch.norm(full_weights, dim=1)
+            
+            gc_weights.append(series_gc)
+
+        gc_matrix = torch.stack(gc_weights) # GC 权重堆叠起来
+        
+        if threshold:
+            return (gc_matrix > 0).int()
+        else:
+            return gc_matrix # [series_num, series_num]，如果ignore_kernel=False，形状为 [series_num, series_num, kernel_size]
