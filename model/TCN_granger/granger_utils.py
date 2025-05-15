@@ -198,3 +198,5 @@ def lasso_penalty(network, lam, penalty):
                           for i in range(lag)])
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
+
+

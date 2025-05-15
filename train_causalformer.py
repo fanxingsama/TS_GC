@@ -1,12 +1,33 @@
+from datetime import datetime
 import os
+from pathlib import Path
+from matplotlib import rcParams
 import torch
 import torch.optim as optim
+from data_loader import TimeSeriesDataloader
+import torch.nn as nn
+from model.Granger_causalFormer import PredictModel
 from model.TCN_granger.granger_utils import (
     lasso_penalty,
-    PGD_update,
+    PGD_update
 )
 import matplotlib.pyplot as plt
-import numpy as np
+
+rcParams['font.family'] = 'SimHei'
+rcParams['axes.unicode_minus'] = False
+
+DATA_SEED = 42  # 用于可重复性的随机种子
+INPUT_WINDOW = 10 # 输入序列长度 (输入窗口)
+OUTPUT_WINDOW = 1 # 预测下一个时间步
+FEATURE_DIM = 1 # 每个时间序列在每个时间点上的特征数量
+OUTPUT_DIM = 1  # 每个时间序列在每个预测时间步上输出的目标数量
+
+# --- 训练参数 ---
+EPOCHS = 30
+BATCH_SIZE = 128
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+data_path = 'data/fMRI/timeseries9.csv'
+true_gc_path = 'data/fMRI/sim9_gt_processed.csv'
 
 
 class CausalFormerTrainer:
@@ -28,6 +49,16 @@ class CausalFormerTrainer:
         self.early_stop_patience = 3
         self.best_loss_result = float('inf') 
         self.verbose = verbose  # 日志详细程度
+        
+        self.train_losses = []
+        self.train_mses = []
+        self.train_ridges = []
+        self.train_penalties = []
+
+        self.val_losses = []
+        self.val_mses = []
+        self.val_ridges = []
+        self.val_penalties = []
         
         # 创建优化器，排除TCN第一层权重
         self.first_layer_params = []
@@ -94,7 +125,7 @@ class CausalFormerTrainer:
             with torch.no_grad():
                 nonsmooth_penalty = 0
                 for i, name, param in self.first_layer_params:
-                    nonsmooth_penalty += lasso_penalty(param, self.lambda_reg, self.penalty_type)
+                    nonsmooth_penalty += lasso_penalty(param, self.lambda_reg, self.penalty_type) # 计算Lasso正则化值
                 nonsmooth_penalty /= len(self.first_layer_params) if self.first_layer_params else 1
                 
                 # 总损失 = 平滑损失 + 非平滑正则化
@@ -163,18 +194,8 @@ class CausalFormerTrainer:
             
         return avg_val_loss, avg_val_mse, avg_val_ridge, avg_val_penalty
     
-    def train(self):
+    def train(self, save_model=False):
         not_improved_count = 0
-        train_losses = []
-        train_mses = []
-        train_ridges = []
-        train_penalties = []
-
-        val_losses = []
-        val_mses = []
-        val_ridges = []
-        val_penalties = []
-        
         best_model_state = None
         
         for epoch in range(1, self.epochs + 1):
@@ -185,15 +206,15 @@ class CausalFormerTrainer:
             val_loss, val_mse, val_ridge, val_penalty = self.valid_epoch()
             
             # 记录指标
-            train_losses.append(epoch_loss)
-            train_mses.append(epoch_mse)
-            train_ridges.append(epoch_ridge)
-            train_penalties.append(epoch_penalty)
+            self.train_losses.append(epoch_loss)
+            self.train_mses.append(epoch_mse)
+            self.train_ridges.append(epoch_ridge)
+            self.train_penalties.append(epoch_penalty)
 
-            val_losses.append(val_loss)
-            val_mses.append(val_mse)
-            val_ridges.append(val_ridge)
-            val_penalties.append(val_penalty)
+            self.val_losses.append(val_loss)
+            self.val_mses.append(val_mse)
+            self.val_ridges.append(val_ridge)
+            self.val_penalties.append(val_penalty)
             
             # 打印进度
             print(f'本轮训练集： Train_loss = {epoch_loss:.6f}, Val_loss = {val_loss:.6f}, '
@@ -209,8 +230,9 @@ class CausalFormerTrainer:
                 print(f"==成功改进，最佳总损失：{val_loss:.6f}==")
                 
                 # 保存最佳模型
-                # os.makedirs(self.save_dir, exist_ok=True)
-                # torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'best_model.pth'))
+                if(save_model):
+                    os.makedirs(self.save_dir, exist_ok=True)
+                    torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'best_model.pth'))
             else:
                 not_improved_count += 1
                 print(f"未改进 ({not_improved_count}/{self.early_stop_patience})")
@@ -218,25 +240,19 @@ class CausalFormerTrainer:
             # 早停检查
             if not_improved_count >= self.early_stop_patience:
                 print(f"在第{epoch}轮触发早停，模型的最终总损失：{val_loss:.6f}")
-                # 恢复最佳模型
                 if best_model_state is not None:
                     self.model.load_state_dict(best_model_state)
                 break
-        
-        # 训练结束后绘制损失曲线
-        # self.plot_training_curves(train_losses, train_mses, train_ridges, train_penalties,
-        #                          val_losses, val_mses, val_ridges, val_penalties)
                 
         return self.best_loss_result
     
-    def plot_training_curves(self, train_losses, train_mses, train_ridges, train_penalties,
-                             val_losses, val_mses, val_ridges, val_penalties):
+    def plot_training_curves(self):
         plt.figure(figsize=(12, 8))
 
         # 绘制总损失曲线
         plt.subplot(2, 2, 1)
-        plt.plot(train_losses, label='Train Loss')
-        plt.plot(val_losses, label='Validation Loss')
+        plt.plot(self.train_losses, label='Train Loss')
+        plt.plot(self.val_losses, label='Validation Loss')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.title('Total Loss')
@@ -244,8 +260,8 @@ class CausalFormerTrainer:
 
         # 绘制MSE曲线
         plt.subplot(2, 2, 2)
-        plt.plot(train_mses, label='Train MSE')
-        plt.plot(val_mses, label='Validation MSE')
+        plt.plot(self.train_mses, label='Train MSE')
+        plt.plot(self.val_mses, label='Validation MSE')
         plt.xlabel('Epoch')
         plt.ylabel('MSE')
         plt.title('MSE')
@@ -253,8 +269,8 @@ class CausalFormerTrainer:
 
         # 绘制Ridge损失曲线
         plt.subplot(2, 2, 3)
-        plt.plot(train_ridges, label='Train Ridge')
-        plt.plot(val_ridges, label='Validation Ridge')
+        plt.plot(self.train_ridges, label='Train Ridge')
+        plt.plot(self.val_ridges, label='Validation Ridge')
         plt.xlabel('Epoch')
         plt.ylabel('Ridge Loss')
         plt.title('Ridge Loss')
@@ -262,8 +278,8 @@ class CausalFormerTrainer:
 
         # 绘制非平滑正则化损失曲线
         plt.subplot(2, 2, 4)
-        plt.plot(train_penalties, label='Train Penalty')
-        plt.plot(val_penalties, label='Validation Penalty')
+        plt.plot(self.train_penalties, label='Train Penalty')
+        plt.plot(self.val_penalties, label='Validation Penalty')
         plt.xlabel('Epoch')
         plt.ylabel('Penalty')
         plt.title('Non-smooth Penalty')
@@ -272,3 +288,67 @@ class CausalFormerTrainer:
         plt.tight_layout()
         save_path = os.path.join(self.save_dir, 'training_curves.png')
         plt.savefig(save_path)
+        
+        
+def main():
+    run_id = datetime.now().strftime(r'%m-%d_%H-%M-%S')
+    save_dir = Path('saved') / run_id
+    # setup_logging(save_dir)
+    # train_logger = get_logger() # 日志记录器
+
+    timeseriesDataLoader = TimeSeriesDataloader(data_dir=data_path, gc_dir=true_gc_path, batch_size=BATCH_SIZE, 
+                                                DATA_SEED=DATA_SEED, input_window=INPUT_WINDOW, output_window=OUTPUT_WINDOW)
+    train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
+    series_num = timeseriesDataLoader.series_num # 获取序列数量
+    
+    # CausalFormer 参数
+    d_model = 32
+    n_head = 8
+    n_layers = 3
+    ffn_hidden = 256
+    dropout = 0
+    tau = 50
+
+    # GrangerTCN 参数
+    tcn_channels = 64
+    tcn_kernel_size = 4
+    tcn_dropout = 0
+
+    # 训练参数
+    criterion = nn.MSELoss()
+    lr = 1e-4
+    lambda_reg =1e-5
+    penalty_type = 'H'
+    
+    config = {
+        'data_loader': {
+            'args': {
+                'input_window': INPUT_WINDOW,
+                'output_window': OUTPUT_WINDOW,
+                'feature_dim': FEATURE_DIM,
+                'output_dim': OUTPUT_DIM,
+                'series_num': series_num
+            }
+        },
+        'device': DEVICE.type # 传递设备类型
+    }
+
+    model = PredictModel(config=config,
+                         d_model=d_model,
+                         n_head=n_head,
+                         n_layers=n_layers,
+                         tcn_channels=tcn_channels,
+                         tcn_kernel_size=tcn_kernel_size,
+                         tcn_dropout=tcn_dropout,
+                         ffn_hidden=ffn_hidden,
+                         drop_prob=dropout,
+                         tau=tau).to(DEVICE)
+    
+    causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
+                                               train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
+                                               penalty_type=penalty_type, lambda_reg=lambda_reg)
+    causalFormerTrainer.train(save_model=True)
+    causalFormerTrainer.plot_training_curves()
+
+if __name__ == '__main__':
+    main()

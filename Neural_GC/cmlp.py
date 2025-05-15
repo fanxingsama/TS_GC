@@ -159,7 +159,7 @@ def prox_update(network, lam, lr, penalty):
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
-# 计算第一层权重矩阵的正则化项，正则化是在损失函数里加入惩罚项，限制模型复杂度，让模型参数变得更简洁
+# 对第一层进行Lasso，正则化是在损失函数里加入惩罚项，限制模型复杂度，让模型参数变得更简洁
 def regularize(network, lam, penalty):
     '''
     Args:
@@ -238,7 +238,7 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
         smooth_list.append(smooth)
         # 对第一层的权重矩阵进行正则化
         with torch.no_grad():
-            nonsmooth = regularize(net, lam, penalty) # 正则化之后的值
+            nonsmooth = regularize(net, lam, penalty) # 对第一层进行Lasso
             loss = smooth + nonsmooth # 计算总损失，模型的目标应该是最小化总损失
             loss_list.append(loss) 
 

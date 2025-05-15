@@ -13,6 +13,7 @@ import optuna
 from logger.logger import get_logger, setup_logging
 from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
+from train_new import CausalFormerTrainer2
 
 # from util import read_json
 from train_causalformer import CausalFormerTrainer
@@ -122,9 +123,12 @@ def objective(trial, logger, save_dir):
     final_avg_val_loss = float('inf')
 
     # ---开始训练---
-    causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
+    causalFormerTrainer = CausalFormerTrainer2(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
                                                train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
                                                penalty_type=penalty_type, lambda_reg=lambda_reg)
+    # causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
+    #                                            train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
+    #                                            penalty_type=penalty_type, lambda_reg=lambda_reg)
     final_avg_val_loss = causalFormerTrainer.train()
     logger.info(f"Trial {trial.number} 完成。最终验证集 loss: {final_avg_val_loss:.6f}")
 
