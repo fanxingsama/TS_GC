@@ -36,7 +36,7 @@ class TemporalBlock(nn.Module):
         super(TemporalBlock, self).__init__()
         # 第一个卷积层
         self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation)
+                               stride=stride, padding=padding, dilation=dilation) # w形状：[out_ch, in_ch, kernel_size]，相当于一个卷积核同时对in_ch条序列进行卷积
         self.chomp1 = Chomp1d(padding)
         self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(dropout)

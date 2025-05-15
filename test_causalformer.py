@@ -15,7 +15,7 @@ import pandas as pd
 import os
 
 # 设置 Matplotlib 中文显示
-rcParams['font.family'] = 'SimHei'
+rcParams['font.family'] = 'Microsoft YaHei'
 rcParams['axes.unicode_minus'] = False
 
 # 加载模型
@@ -51,6 +51,80 @@ def load_model(config, best_params, device):
     ).to(device)
     
     return model
+
+# 采用真阳和假阳评估指标
+def evaluate(logger, gtfile, validatedcauses, columns):
+    extendedgtdelays, readgt, extendedreadgt = getextendeddelays(gtfile, columns)
+    FP=0
+    FPdirect=0
+    TPdirect=0
+    TP=0
+    FN=0
+    FPs = []
+    FPsdirect = []
+    TPsdirect = []
+    TPs = []
+    FNs = []
+    for key in readgt:
+        for v in validatedcauses[key]:
+            if v not in extendedreadgt[key]:
+                FP+=1
+                FPs.append((key,v))
+            else:
+                TP+=1
+                TPs.append((key,v))
+            if v not in readgt[key]:
+                FPdirect+=1
+                FPsdirect.append((key,v))
+            else:
+                TPdirect+=1
+                TPsdirect.append((key,v))
+        for v in readgt[key]:
+            if v not in validatedcauses[key]:
+                FN+=1
+                FNs.append((key, v))
+    
+    def serialization(data):
+        return [f"{e[1]}->{e[0]}" for e in data]
+    logger.info(f"假阳性': {FP}")
+    logger.info(f"真阳性': {TP}")
+    logger.info(f"假阴性: {FN}")
+    logger.info(f"直接误报总数: {FPdirect}")
+    logger.info(f"直接真阳性总数: {TPdirect}")
+    logger.info(f"真阳性序列': {serialization(TPs)}")
+    logger.info(f"假阳性序列': {serialization(FPs)}")
+    logger.info(f"直接真阳性序列: {serialization(TPsdirect)}")
+    logger.info(f"直接假阳性序列: {serialization(FPsdirect)}")
+    logger.info(f"FNs: {serialization(FNs)}")
+    precision = recall = 0.
+
+    logger.info('(包括直接和间接的因果关系)')
+    if float(TP+FP)>0:
+        precision = TP / float(TP+FP)
+    logger.info(f"Precision': {precision}")
+    if float(TP + FN)>0:
+        recall = TP / float(TP + FN)
+    logger.info(f"Recall': {recall}")
+    if (precision + recall) > 0:
+        F1 = 2 * (precision * recall) / (precision + recall)
+    else:
+        F1 = 0.
+    logger.info(f"F1' score: {F1}")
+
+    logger.info('(只包括直接的因果关系)')
+    precision = recall = 0.
+    if float(TPdirect+FPdirect)>0:
+        precision = TPdirect / float(TPdirect+FPdirect)
+    logger.info(f"Precision: {precision}")
+    if float(TPdirect + FN)>0:
+        recall = TPdirect / float(TPdirect + FN)
+    logger.info(f"Recall: {recall}")
+    if (precision + recall) > 0:
+        F1direct = 2 * (precision * recall) / (precision + recall)
+    else:
+        F1direct = 0.
+    logger.info(f"F1 score: {F1direct}")
+    return FP, TP, FPdirect, TPdirect, FN, FPs, FPsdirect, TPs, TPsdirect, FNs, F1, F1direct
 
 # 评估模型
 def evaluate_model(model, test_loader, device, series_num, dataloader, max_samples=100):
@@ -90,14 +164,14 @@ def evaluate_model(model, test_loader, device, series_num, dataloader, max_sampl
     results['targets'] = np.concatenate(results['targets'], axis=0)[:max_samples]
     
     # 反归一化预测和目标数据
-    results['predictions_original_scale'] = dataloader.inverse_transform(results['predictions'])
-    results['targets_original_scale'] = dataloader.inverse_transform(results['targets'])
+    # results['predictions_original_scale'] = dataloader.inverse_transform(results['predictions'])
+    # results['targets_original_scale'] = dataloader.inverse_transform(results['targets'])
     
     # 计算每个时间序列的评估指标（使用原始尺度的数据计算指标）
     for i in range(series_num):
         # 得到当前序列的预测值和真实值（使用原始尺度）
-        pred_series = results['predictions_original_scale'][:, 0, i, 0]  # [samples, output_window=1, series_num, output_dim=1]
-        target_series = results['targets_original_scale'][:, 0, i, 0]
+        pred_series = results['predictions'][:, 0, i, 0]  # [samples, output_window=1, series_num, output_dim=1]
+        target_series = results['targets'][:, 0, i, 0]
         
         # 计算指标
         mse = mean_squared_error(target_series, pred_series)
@@ -111,7 +185,7 @@ def evaluate_model(model, test_loader, device, series_num, dataloader, max_sampl
     return results
 
 # 保存模型的格兰杰因果关系矩阵到 CSV 文件
-def save_gc_to_csv(model, series_num, path, threshold=True, ignore_kernel=True):
+def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True):
     """
     Args:
         path (str): CSV 文件的保存路径
@@ -136,6 +210,9 @@ def save_gc_to_csv(model, series_num, path, threshold=True, ignore_kernel=True):
                             'Strength': strength
                         })
         df = pd.DataFrame(cause_effect_pairs)
+        # 按照 'Cause' 排序，如果 'Cause' 相同，则按照 'Effect' 排序
+        if not df.empty:
+            df.sort_values(by=['source', 'target'], inplace=True)
         
     else:
         cause_effect_pairs = []
@@ -153,6 +230,9 @@ def save_gc_to_csv(model, series_num, path, threshold=True, ignore_kernel=True):
                                 'Strength': strength
                             })
         df = pd.DataFrame(cause_effect_pairs)
+        # 按照 'Cause' 排序，然后 'Effect'，最后 'lag'
+        if not df.empty:
+            df.sort_values(by=['source', 'target', 'lag'], inplace=True)
     df.to_csv(path, index=False)
 
 # 绘制预测结果和真实值的时序序列对比图
@@ -169,7 +249,7 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
         plot_indices = list(range(min(5, series_num)))
     
     # 获取样本数
-    n_samples = results['predictions_original_scale'].shape[0]
+    n_samples = results['predictions'].shape[0]
     time_steps = np.arange(n_samples)
     
     # 创建足够大的图表
@@ -180,8 +260,8 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
         plt.subplot(len(plot_indices), 1, i + 1)
         
         # 提取当前序列的预测和真实值（使用原始尺度的数据）
-        pred_series = results['predictions_original_scale'][:, 0, idx, 0]  # [samples, output_window=1, series_idx, output_dim=1]
-        target_series = results['targets_original_scale'][:, 0, idx, 0]
+        pred_series = results['predictions'][:, 0, idx, 0]  # [samples, output_window=1, series_idx, output_dim=1]
+        target_series = results['targets'][:, 0, idx, 0]
         
         # 绘制曲线
         plt.plot(time_steps, target_series, 'b-', label='真实值', linewidth=2)
@@ -212,7 +292,7 @@ def main(png_save_path):
     gc_dir = 'data/fMRI/sim9_gt_processed.csv'
     BATCH_SIZE = 64
     DATA_SEED = 42
-    INPUT_WINDOW = 20
+    INPUT_WINDOW = 10
     OUTPUT_WINDOW = 1
     FEATURE_DIM = 1
     OUTPUT_DIM = 1
@@ -265,13 +345,11 @@ def main(png_save_path):
     # 得到格兰杰因果关系
     save_gc_to_csv(model, series_num, png_save_path / "granger_causal_matrix.csv", threshold=True, ignore_kernel=True)
     
-    # 绘制预测结果
-    print("\n绘制预测结果...")
     # 选择前5个序列进行绘制
     plot_indices = list(range(min(5, series_num)))
     plot_predictions(results, series_num, plot_indices, save_path= png_save_path / "model_predict.png")
 
 if __name__ == "__main__":
-    run_id = "05-14_09-23-00"  # 
+    run_id = "05-15_11-01-59"  # 
     png_save_path = Path('saved') / run_id
     main(png_save_path)

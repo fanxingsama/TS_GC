@@ -155,11 +155,9 @@ def PGD_update(network, lam, lr, penalty):
       network: MLP network.
       lam: 正则化参数
       lr: 学习率
-      penalty: one of GL (group lasso), GSGL (group sparse group lasso),
-        H (hierarchical).
     '''
     # W = network.layers[0].weight
-    # hidden, p, lag = W.shape
+    hidden, p, lag = network.shape
     if penalty == 'GL': # 组Loss惩罚
         norm = torch.norm(network, dim=(0, 2), keepdim=True)
         network.data = ((network / torch.clamp(norm, min=(lr * lam)))
@@ -171,13 +169,12 @@ def PGD_update(network, lam, lr, penalty):
         norm = torch.norm(network, dim=(0, 2), keepdim=True)
         network.data = ((network / torch.clamp(norm, min=(lr * lam)))
                   * torch.clamp(norm - (lr * lam), min=0.0))
-    # elif penalty == 'H': # 层次Lasso惩罚
-    #     # Lowest indices along third axis touch most lagged values.
-    #     for i in range(lag):
-    #         norm = torch.norm(W[:, :, :(i + 1)], dim=(0, 2), keepdim=True)
-    #         W.data[:, :, :(i+1)] = (
-    #             (W.data[:, :, :(i+1)] / torch.clamp(norm, min=(lr * lam)))
-    #             * torch.clamp(norm - (lr * lam), min=0.0))
+    elif penalty == 'H': # 层次Lasso惩罚
+        for i in range(lag):
+            norm = torch.norm(network[:, :, :(i + 1)], dim=(0, 2), keepdim=True)
+            network.data[:, :, :(i+1)] = (
+                (network.data[:, :, :(i+1)] / torch.clamp(norm, min=(lr * lam)))
+                * torch.clamp(norm - (lr * lam), min=0.0))
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
@@ -190,15 +187,14 @@ def lasso_penalty(network, lam, penalty):
         H (hierarchical).
     '''
     # W = network.layers[0].weight # 选择第一层
-    # hidden, p, lag = W.shape
+    hidden, p, lag = network.shape
     if penalty == 'GL': # 组Loss惩罚
         return lam * torch.sum(torch.norm(network, dim=(0, 2)))
     elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
         return lam * (torch.sum(torch.norm(network, dim=(0, 2)))
                       + torch.sum(torch.norm(network, dim=0)))
-    # elif penalty == 'H': # 层次Lasso惩罚
-    #     # Lowest indices along third axis touch most lagged values.
-    #     return lam * sum([torch.sum(torch.norm(W[:, :, :(i+1)], dim=(0, 2)))
-    #                       for i in range(lag)])
+    elif penalty == 'H': # 层次Lasso惩罚
+        return lam * sum([torch.sum(torch.norm(network[:, :, :(i+1)], dim=(0, 2)))
+                          for i in range(lag)])
     else:
         raise ValueError('unsupported penalty: %s' % penalty)

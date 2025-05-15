@@ -65,8 +65,7 @@ class CausalFormerTrainer:
         # 批量训练
         for batch_idx, (batch_x, batch_y) in enumerate(self.train_loader):
             batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
-            
-            # 1. 计算主要损失（MSE + Ridge正则化）
+        
             self.optimizer.zero_grad()
             predictions = self.model(batch_x)
             
@@ -75,32 +74,23 @@ class CausalFormerTrainer:
             for i in range(self.series_num):
                 mse_loss += self.criterion(predictions[:, :, i:i+1, :], batch_y[:, :, i:i+1, :])
             mse_loss /= self.series_num
-            
-            # 计算Ridge正则化损失
             ridge_loss = self.ridge_regularize()
+            smooth_loss = mse_loss + ridge_loss # 总平滑损失（MSE + Ridge）
+            smooth_loss.backward() # 反向传播，计算得到所有层的梯度
+            self.optimizer.step() # 对除了第一层以外的其他参数进行标准优化器更新
             
-            # 总平滑损失（MSE + Ridge）
-            smooth_loss = mse_loss + ridge_loss
-            
-            # 反向传播
-            smooth_loss.backward()
-            
-            # 2. 对普通参数进行标准优化器更新
-            self.optimizer.step()
-            
-            # 3. 对TCN第一层应用近端梯度下降
+            # 对TCN第一层应用近端梯度下降
             for i, name, param in self.first_layer_params:
                 # 保存当前梯度
                 if param.grad is not None:
                     with torch.no_grad():
                         # 先执行标准的梯度下降步骤
-                        param_copy = param.clone()
                         param.data = param - self.lr * param.grad
                         
                         # 再应用近端梯度下降
                         PGD_update(param, self.lambda_reg, self.lr, self.penalty_type)
             
-            # 4. 计算非平滑正则化值（仅用于记录，不影响梯度）
+            # 计算非平滑正则化值（仅用于记录，不影响梯度）
             with torch.no_grad():
                 nonsmooth_penalty = 0
                 for i, name, param in self.first_layer_params:
@@ -209,7 +199,7 @@ class CausalFormerTrainer:
             print(f'本轮训练集： Train_loss = {epoch_loss:.6f}, Val_loss = {val_loss:.6f}, '
                   f'Train_MSE = {epoch_mse:.6f}, Val_MSE = {val_mse:.6f}, '
                   f'Train_otherLayer_L2 = {epoch_ridge:.6f}, Val_otherLayer_L2 = {val_ridge:.6f}, '
-                  f'Train_lasso_value = {epoch_penalty:.6f}, Val_lasso_value = {val_penalty:.6f}')
+                  f'Train_Lasso = {epoch_penalty:.6f}, Val_Lasso = {val_penalty:.6f}')
             
             # 模型保存和早停
             if val_loss < self.best_loss_result:

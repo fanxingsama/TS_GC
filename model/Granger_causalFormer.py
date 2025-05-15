@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import math
@@ -360,7 +361,7 @@ class PredictModel(nn.Module):
     def forward(self, x):
         # x = [batch_size, input_window, series_num, feature]
         x = x.permute(0, 2, 1, 3)  # 维度交换位置，适配其他层所需的形状，[batch_size, series_num, input_window, feature_dim]
-        encoder_out = self.encoder(x) # [batch_size, series_num, input_window, feature_dim]
+        encoder_out = self.encoder(x) # 编码器处理输入序列，生成整个序列的编码表示，[batch_size, series_num, input_window, feature_dim]
         last_step_out = encoder_out[:, :, -1, :] # 提取input_window上最后一个时间步的输出，用于预测未来。[batch_size, series_num, feature_dim]
         out = self.fc(last_step_out) # 全连接，将 feature_dim 的特征向量映射到输出值维度 output_dim（这里是1，表示单步预测单个值）。[batch_size, series_num, output_dim]
         out = out.unsqueeze(1) # [batch_size, 1, series_num, output_dim]
@@ -368,29 +369,32 @@ class PredictModel(nn.Module):
             out = out.repeat(1, self.output_window, 1, 1)
         return out # [batch_size, output_window, series_num, output_dim]
     
-    def GC(self, threshold=True, ignore_kernel=True):
-        gc_weights = []
+    # 得到格兰杰因果矩阵
+    def GC(self, threshold=False, ignore_kernel=True, weight_threshold=0.0):
+        '''
+        kernel_size在这里代表着时间延迟
+        ignore_kernel=True时，会将所有时间延迟（卷积核尺寸）信息合并为一个单一值，输出一个形状为 (series_num, series_num) 的矩阵，每个元素 (i,j) 表示从序列 j 到序列 i 的总体格兰杰因果关系强度
+        ignore_kernel=False时，会保留不同时间延迟的细节信息，输出一个形状为 (series_num, series_num, kernel_size) 的矩阵，每个元素 (i,j,k) 表示从序列 j 在延迟 k 时间点对序列 i 的格兰杰因果影响
+        threshold代表是否要把格兰杰因果矩阵的权重值进行转换，为True时中的所有非零值转换为 1，零值保持为 0，为 False，则返回原始的格兰杰因果矩阵，其中的值表示因果关系的强度。
+        '''
+        gc_matrix = torch.zeros(self.series_num, self.series_num, device='cuda:0')
         
-        for i in range(self.series_num):
-            weights = self.encoder.layers[0].attention.tcn_processors[i].get_first_block_conv1_weights() # [output_channels, input_channels, kernel_size]
-            full_weights = torch.zeros(self.series_num, *weights.shape[1:], device=weights.device) # 目标序列的完整因果矩阵
+        for i in range(self.series_num):  # 目标序列
+            weights = self.encoder.layers[0].attention.tcn_processors[i].get_first_block_conv1_weights()  # [output_feature, input_channels, kernel_size]
             
-            # 填充除了目标序列之外的所有序列的权重
-            mask = torch.ones(self.series_num, dtype=torch.bool, device=weights.device)
-            mask[i] = False # 排除目标序列
-            full_weights[mask] = weights.reshape(-1, *weights.shape[1:]) # 使用 mask 将权重 weights 填充到 full_weights 中，排除目标序列自身。
-            if ignore_kernel:
-                # 计算跨输出通道和卷积核大小维度的范数
-                series_gc = torch.norm(full_weights, dim=(1, 2))
-            else:
-                # 计算仅跨输出通道维度的范数
-                series_gc = torch.norm(full_weights, dim=1)
-            
-            gc_weights.append(series_gc)
-
-        gc_matrix = torch.stack(gc_weights) # GC 权重堆叠起来
-        
+            # 直接在input_channels维度上计算影响
+            for j in range(self.series_num):  # 源序列
+                if j != i and j < weights.shape[1]:  # 排除自身影响且确保索引在范围内
+                    if ignore_kernel:
+                        # 计算序列j对序列i的总体影响（跨所有output_feature和time_delays）
+                        # 沿output_feature和kernel_size维度计算norm
+                        gc_matrix[i, j] = torch.norm(weights[:, j, :])  # 这相当于计算所有output_feature和所有time_delay的综合影响
+                    else:
+                        # 保留时间延迟维度
+                        for k in range(weights.shape[2]):  # 遍历kernel_size
+                            gc_matrix[i, j, k] = torch.norm(weights[:, j, k])  # 计算特定time_delay的影响
+        print("GC matrix:", gc_matrix)
         if threshold:
-            return (gc_matrix > 0).int()
+            return (gc_matrix > weight_threshold).int()
         else:
             return gc_matrix # [series_num, series_num]，如果ignore_kernel=False，形状为 [series_num, series_num, kernel_size]

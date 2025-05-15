@@ -84,8 +84,8 @@ def objective(trial, logger, save_dir):
     criterion = loss_functions_list[loss_function_name]  # 从字典中获取实际的损失函数对象
     lr = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)     # 学习率
     lambda_reg = trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True) # 正则化惩罚项在总损失函数中的整体权重或强度
-    # penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL']) # 惩罚类型
-    penalty_type = 'GL' # 惩罚类型
+    penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL', 'H']) # 惩罚类型
+    # penalty_type = 'GL' # 惩罚类型
 
     print(f"\n--- Trial {trial.number} ---")
     print(f"  CausalFormer 参数:d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
