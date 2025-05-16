@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from visual.causalMatrix import compare_causality_csvs, visualize_single_causality_csv
 from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
 import pandas as pd
@@ -192,6 +193,7 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
         threshold (bool): 是否使用阈值化的结果
         ignore_kernel (bool): 是否忽略核大小维度
     """
+    csv_path = os.path.join(path, "GC_matrix.csv")
 
     # 获取 GC 矩阵
     gc_matrix = model.GC(threshold=threshold, ignore_kernel=ignore_kernel)
@@ -233,7 +235,9 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
         # 按照 'Cause' 排序，然后 'Effect'，最后 'lag'
         if not df.empty:
             df.sort_values(by=['source', 'target', 'lag'], inplace=True)
-    df.to_csv(path, index=False)
+    df.to_csv(csv_path, index=False)
+    matrix_png_save_path = os.path.join(path, "GC_matrix.png")
+    visualize_single_causality_csv(csv_path, matrix_png_save_path, show=False)
 
 # 绘制预测结果和真实值的时序序列对比图
 def plot_predictions(results, series_num, plot_indices, save_path=None):
@@ -343,13 +347,13 @@ def main(png_save_path):
     print(f"平均 R²: {overall_r2:.6f}")
     
     # 得到格兰杰因果关系
-    save_gc_to_csv(model, series_num, png_save_path / "granger_causal_matrix.csv", threshold=True, ignore_kernel=True)
+    save_gc_to_csv(model, series_num, png_save_path, threshold=True, ignore_kernel=True)
     
     # 选择前5个序列进行绘制
     plot_indices = list(range(min(5, series_num)))
     plot_predictions(results, series_num, plot_indices, save_path= png_save_path / "model_predict.png")
 
 if __name__ == "__main__":
-    run_id = "05-15_11-01-59"  # 
+    run_id = "05-16_11-12-28"  # 
     png_save_path = Path('saved') / run_id
     main(png_save_path)

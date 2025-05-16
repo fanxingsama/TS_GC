@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # 从单个CSV文件绘制因果矩阵图
-def visualize_single_causality_csv(csv_path):
+def visualize_single_causality_csv(csv_path, png_path=False, show=True):
     try:
         df = pd.read_csv(csv_path)
         # 确保CSV文件包含所需的列
@@ -73,7 +73,10 @@ def visualize_single_causality_csv(csv_path):
                              ha="center", va="center", color=text_color)
     
     plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    if png_path:
+        plt.savefig(png_path)
     
     if has_delay:
         return causality_matrix, delay_matrix, all_nodes
@@ -81,7 +84,7 @@ def visualize_single_causality_csv(csv_path):
         return causality_matrix, all_nodes
 
 # 比较两个因果关系CSV文件，并标出不一致的地方
-def compare_causality_csvs(true_csv_path, estimated_csv_path):
+def compare_causality_csvs(true_csv_path, estimated_csv_path, png_path=False, show=True):
     try:
         true_df = pd.read_csv(true_csv_path)
         estimated_df = pd.read_csv(estimated_csv_path)
@@ -196,7 +199,10 @@ def compare_causality_csvs(true_csv_path, estimated_csv_path):
                              ha="center", va="center", color=text_color)
     
     plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    if png_path:
+        plt.savefig(png_path)
     
     result = [true_matrix, estimated_matrix, all_nodes]
     if has_delay_true:

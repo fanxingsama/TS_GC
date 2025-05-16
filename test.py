@@ -49,7 +49,7 @@ def load_model(config, best_params, device):
     
     return model
 
-run_id = "05-14_19-07-54"  # 
+run_id = "05-15_11-01-59"  # 
 png_save_path = Path('saved') / run_id
 
 
@@ -91,4 +91,13 @@ config = {
 }
 model = load_model(config, best_params, device) # 构建模型
 
-gc_matrix = model.GC(threshold=False)
+# test = model.encoder.layers[0].attention.tcn_processors[1]
+# for name, param in model.named_parameters():
+#     print(name)
+
+for i in range(5):
+    for (name, param) in model.named_parameters():
+        # 检查参数是否属于当前TCN
+        if f"encoder.layers.0.attention.tcn_processors.{i}" in name:
+            print('++++++++++',name)
+    print('-------------')

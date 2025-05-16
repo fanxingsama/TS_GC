@@ -150,13 +150,6 @@ def calculate_group_sparse_group_lasso_penalty(weights, lambda_reg, alpha):
 
 # 对神经网络的第一层权重矩阵进行近端更新，作用于函数，直接对函数的参数进行稀疏性约束，使得某些参数被设置为零，从而实现稀疏性。
 def PGD_update(network, lam, lr, penalty):
-    '''
-    Args:
-      network: MLP network.
-      lam: 正则化参数
-      lr: 学习率
-    '''
-    # W = network.layers[0].weight
     hidden, p, lag = network.shape
     if penalty == 'GL': # 组Loss惩罚
         norm = torch.norm(network, dim=(0, 2), keepdim=True)
@@ -180,13 +173,6 @@ def PGD_update(network, lam, lr, penalty):
 
 # 计算第一层权重矩阵的正则化项，正则化是在损失函数里加入惩罚项，限制模型复杂度，让模型参数变得更简洁
 def lasso_penalty(network, lam, penalty):
-    '''
-    Args:
-      network: MLP network.
-      penalty: one of GL (group lasso), GSGL (group sparse group lasso),
-        H (hierarchical).
-    '''
-    # W = network.layers[0].weight # 选择第一层
     hidden, p, lag = network.shape
     if penalty == 'GL': # 组Loss惩罚
         return lam * torch.sum(torch.norm(network, dim=(0, 2)))

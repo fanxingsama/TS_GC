@@ -393,7 +393,7 @@ class PredictModel(nn.Module):
                         # 保留时间延迟维度
                         for k in range(weights.shape[2]):  # 遍历kernel_size
                             gc_matrix[i, j, k] = torch.norm(weights[:, j, k])  # 计算特定time_delay的影响
-        print("GC matrix:", gc_matrix)
+        # print("GC matrix:", gc_matrix)
         if threshold:
             return (gc_matrix > weight_threshold).int()
         else:

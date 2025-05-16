@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 from pathlib import Path
 import joblib
 import torch
@@ -67,13 +68,13 @@ def objective(trial, logger, save_dir):
     n_head = trial.suggest_categorical('n_head', [2, 4, 8])             # 注意力头数
     n_layers = trial.suggest_int('n_layers', 1, 3)                      # Encoder 层数
     ffn_hidden = trial.suggest_categorical('ffn_hidden', [64, 128, 256, 512])# FFN 隐藏层维度
-    dropout = trial.suggest_float('dropout', 0.0, 0.3)                  # Dropout
-    tau = trial.suggest_float('tau', 0.5, 100.0, log=True)               # Softmax 温度
+    dropout = round(trial.suggest_float('dropout', 0.0, 0.3), 5)                 # Dropout
+    tau = round(trial.suggest_float('tau', 0.5, 100.0, log=True), 5)               # Softmax 温度
 
     # GrangerTCN 参数
     tcn_channels = trial.suggest_categorical('tcn_channels', [32, 64, 128, 256]) # TCN 通道数
     tcn_kernel_size = trial.suggest_categorical('tcn_kernel_size', [2, 3, 4]) # TCN 核大小
-    tcn_dropout = trial.suggest_float('tcn_dropout', 0.0, 0.3)          # TCN Dropout
+    tcn_dropout = round(trial.suggest_float('tcn_dropout', 0.0, 0.3), 5)         # TCN Dropout
 
     # 近端梯度下降和稀疏性参数
     loss_functions_list = {
@@ -83,8 +84,8 @@ def objective(trial, logger, save_dir):
     }
     loss_function_name = trial.suggest_categorical('criterion', list(loss_functions_list.keys()))
     criterion = loss_functions_list[loss_function_name]  # 从字典中获取实际的损失函数对象
-    lr = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)     # 学习率
-    lambda_reg = trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True) # 正则化惩罚项在总损失函数中的整体权重或强度
+    lr = round(trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True), 5)     # 学习率
+    lambda_reg = round(trial.suggest_float('lambda_reg', 1e-5, 1e-1, log=True), 5) # 正则化惩罚项在总损失函数中的整体权重或强度
     penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL', 'H']) # 惩罚类型
     # penalty_type = 'GL' # 惩罚类型
 
@@ -119,9 +120,6 @@ def objective(trial, logger, save_dir):
                          drop_prob=dropout,
                          tau=tau).to(DEVICE)
 
-    # --- 近端优化训练循环 ---
-    final_avg_val_loss = float('inf')
-
     # ---开始训练---
     causalFormerTrainer = CausalFormerTrainer2(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
                                                train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
@@ -129,17 +127,32 @@ def objective(trial, logger, save_dir):
     # causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
     #                                            train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
     #                                            penalty_type=penalty_type, lambda_reg=lambda_reg)
-    final_avg_val_loss = causalFormerTrainer.train()
-    logger.info(f"Trial {trial.number} 完成。最终验证集 loss: {final_avg_val_loss:.6f}")
+    Vailed_loss= causalFormerTrainer.train()
+    
+    # 保存训练器的状态用于后续恢复
+    trainer_losses = {
+        'train_losses': [float(x) for x in causalFormerTrainer.train_losses],
+        'train_mses': [float(x) for x in causalFormerTrainer.train_mses],
+        'train_ridges': [float(x) for x in causalFormerTrainer.train_ridges],
+        'train_penalties': [float(x) for x in causalFormerTrainer.train_penalties],
+        'val_losses': [float(x) for x in causalFormerTrainer.val_losses],
+        'val_mses': [float(x) for x in causalFormerTrainer.val_mses],
+        'val_ridges': [float(x) for x in causalFormerTrainer.val_ridges],
+        'val_penalties': [float(x) for x in causalFormerTrainer.val_penalties]
+    }
+    
+    # 保存训练器的状态用于后续恢复
+    trial.set_user_attr('trainer_losses', trainer_losses)
+    
+    logger.info(f"Trial {trial.number} 完成。验证集 loss: {Vailed_loss:.6f}")
 
-    return final_avg_val_loss
+    return Vailed_loss
 
 def begin_optuna(save_dir, logger):
-    # --- 3. 创建或加载 Optuna Study 并运行优化 ---
     study = optuna.create_study(
         study_name=STUDY_NAME,
-        storage=STORAGE_PATH,
-        load_if_exists=True,
+        # storage=STORAGE_PATH,
+        # load_if_exists=True,
         direction='minimize' # 修改优化目标为最小化
     )
     optuna.logging.set_verbosity(optuna.logging.WARNING) # 设置 Optuna 的日志级别为警告级别
@@ -161,12 +174,13 @@ def begin_optuna(save_dir, logger):
     logger.info(f"  目标值 (Val MSE): {best_trial.value:.6f}") 
     logger.info(f"  最佳超参数:")
     best_params = best_trial.params
+    
     for key, value in best_params.items():
         logger.info(f"    {key}: {value}")
         joblib.dump(best_params, save_dir / "best_params.pkl") # 保存最佳参数
     return completed_trials, best_trial, best_params
 
-# --- 5. Matplotlib可视化优化过程 ---
+# ---  可视化optuna优化过程 ---
 def matplot_optuna(completed_trials, best_trial, save_dir):
     mse_values = [t.value for t in completed_trials if t.value is not None and np.isfinite(t.value)] # 过滤掉 None 和非有限值
     valid_trial_numbers = [t.number for t in completed_trials if t.value is not None and np.isfinite(t.value)]
@@ -186,6 +200,64 @@ def matplot_optuna(completed_trials, best_trial, save_dir):
     plt.tight_layout()
     plt.savefig(save_dir / 'optuna_history.png') # 保存图像
 
+# 可视化最优的一组的训练过程
+def plot_best_trial_curves(best_trial, save_dir):
+    # 获取最佳trial的损失数据
+    losses = best_trial.user_attrs['trainer_losses']
+    
+    # 创建保存图表的目录
+    best_plots_dir = save_dir / "best_trial_train_plots"
+    os.makedirs(best_plots_dir, exist_ok=True)
+    
+    # 绘制训练和验证的总损失
+    plt.figure(figsize=(10, 6))
+    plt.plot(losses['train_losses'], label='Train Loss')
+    plt.plot(losses['val_losses'], label='Validation Loss')
+    plt.title(f'Best Trial ({best_trial.number}) - Total Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(best_plots_dir / 'total_loss.png')
+    plt.close()
+    
+    # 绘制训练和验证的MSE损失
+    plt.figure(figsize=(10, 6))
+    plt.plot(losses['train_mses'], label='Train MSE')
+    plt.plot(losses['val_mses'], label='Validation MSE')
+    plt.title(f'Best Trial ({best_trial.number}) - MSE Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('MSE')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(best_plots_dir / 'mse_loss.png')
+    plt.close()
+    
+    # 绘制训练和验证的Ridge正则化损失
+    plt.figure(figsize=(10, 6))
+    plt.plot(losses['train_ridges'], label='Train Ridge')
+    plt.plot(losses['val_ridges'], label='Validation Ridge')
+    plt.title(f'Best Trial ({best_trial.number}) - Ridge Regularization')
+    plt.xlabel('Epoch')
+    plt.ylabel('Ridge Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(best_plots_dir / 'ridge_loss.png')
+    plt.close()
+    
+    # 绘制训练和验证的非平滑正则化损失
+    plt.figure(figsize=(10, 6))
+    plt.plot(losses['train_penalties'], label='Train Penalty')
+    plt.plot(losses['val_penalties'], label='Validation Penalty')
+    plt.title(f'Best Trial ({best_trial.number}) - Non-smooth Regularization')
+    plt.xlabel('Epoch')
+    plt.ylabel('Penalty Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(best_plots_dir / 'penalty_loss.png')
+    plt.close()
+    
+    print(f"Best trial ({best_trial.number}) training plots saved to {best_plots_dir}")
 def main(run_id):
     # 设置记录器
     log_save_path = Path('saved') / run_id
@@ -194,6 +266,7 @@ def main(run_id):
     
     completed_trials, best_trial, best_params = begin_optuna(log_save_path, train_logger) # 开始Optuna超参数优化
     matplot_optuna(completed_trials, best_trial, log_save_path) # 可视化优化过程
+    plot_best_trial_curves(best_trial, log_save_path) # 绘制最佳 trial 的训练曲线
 
     
 if __name__ == '__main__':
