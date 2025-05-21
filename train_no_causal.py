@@ -9,7 +9,6 @@ import torch.optim as optim
 from data_loader import TimeSeriesDataloader
 from logger.logger import get_logger, setup_logging
 from model.Granger_causalFormer import PredictModel
-from model.transformer import PredictModel2
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 import matplotlib.pyplot as plt
 from config import DATA_PATH, gc_dir, BATCH_SIZE, DATA_SEED, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE

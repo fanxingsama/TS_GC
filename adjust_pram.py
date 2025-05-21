@@ -15,10 +15,8 @@ import optuna
 from logger.logger import get_logger, setup_logging
 from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
-from train_causalformer import CausalFormerTrainer
 from train_with_line import CausalFormerTrainer2
 from train_no_line import CausalFormerTrainer3
-from train_test import CausalFormerTrainer4
 from config import DATA_PATH, gc_dir, BATCH_SIZE, DATA_SEED, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE, timeseriesDataLoader, series_num
 
 
