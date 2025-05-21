@@ -37,32 +37,34 @@ class MLP(nn.Module):
 
         return X.transpose(2, 1)
 
+
 # 一个组件化多层感知机模型，为每个时间序列分别训练一个MLP。
 class cMLP(nn.Module):
     def __init__(self, num_series, lag, hidden, activation='relu'):
         '''
+        cMLP model with one MLP per time series.
+
         Args:
-          num_series: dimensionality of multivariate time series.
-          lag: number of previous time points to use in prediction.
-          hidden: list of number of hidden units per layer.
-          activation: nonlinearity at each layer.
+          num_series: 时间序列的数量
+          lag: 模型预测当前时间点，会考虑过去的多少个时间点
+          hidden: 每层隐藏单元的数量。
+          activation: 非线性激活函数
         '''
         super(cMLP, self).__init__()
         self.p = num_series
         self.lag = lag
         self.activation = activation_helper(activation)
 
-        # 根据时间序列的数量，为每个时间序列创建一个MLP网络
+        # Set up networks.
         self.networks = nn.ModuleList([
             MLP(num_series, lag, hidden, activation)
             for _ in range(num_series)])
 
     def forward(self, X):
         '''
+        Args:
           X: torch tensor of shape (batch, T, p).
         '''
-        # network(X)是实例化一个MLP网络，输入是X，执行前向传播
-        # 这里让每个网络都执行一遍前向传播，torch.cat()函数将它们的输出连接在一起
         return torch.cat([network(X) for network in self.networks], dim=2)
 
     def GC(self, threshold=True, ignore_lag=True):
@@ -86,13 +88,16 @@ class cMLP(nn.Module):
             return GC
 
 
-# 一个稀疏化的组件化多层感知机,加入了因果关系，希望能够增加预测效果
+# 一个稀疏化的组件化多层感知机模型，仅使用指定的交互关系。
 class cMLPSparse(nn.Module):
     def __init__(self, num_series, sparsity, lag, hidden, activation='relu'):
         '''
+        cMLP model that only uses specified interactions.
+
         Args:
           num_series: dimensionality of multivariate time series.
-          sparsity: 格兰杰因果关系，维度： (num_series, num_series).
+          sparsity: torch byte tensor indicating Granger causality, with size
+            (num_series, num_series).
           lag: number of previous time points to use in prediction.
           hidden: list of number of hidden units per layer.
           activation: nonlinearity at each layer.
@@ -103,11 +108,10 @@ class cMLPSparse(nn.Module):
         self.activation = activation_helper(activation)
         self.sparsity = sparsity
 
+        # Set up networks.
         self.networks = []
         for i in range(num_series):
-            # 针对每个时间序列，找到跟它有因果关系的时间序列
             num_inputs = int(torch.sum(sparsity[i].int()))
-            # 把这些有因果关系的序列输入到MLP
             self.networks.append(MLP(num_inputs, lag, hidden, activation))
 
         # Register parameters.
@@ -159,7 +163,7 @@ def prox_update(network, lam, lr, penalty):
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
-# 对第一层进行Lasso，正则化是在损失函数里加入惩罚项，限制模型复杂度，让模型参数变得更简洁
+# 计算第一层权重矩阵的Lasso惩罚项值
 def regularize(network, lam, penalty):
     '''
     Args:
@@ -203,7 +207,7 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
 
     Args:
         clstm：clstm模型。
-        X：数据张量，形状为（batch, T, p）。
+        X：模型的数据张量，形状为（batch, T, p）。
         lam：非平滑正则化的参数。
         lam_ridge：输出层的岭正则化参数。
         lr：学习率。
@@ -226,23 +230,23 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
     loss_fn = nn.MSELoss(reduction='mean')
     lr_list = [lr for _ in range(p)] # 每个网络的学习率列表
 
+    # Calculate full loss.
     mse_list = []
     smooth_list = []
     loss_list = []
     for i in range(p): # 对每个网络进行处理
         net = cmlp.networks[i]
-        mse = loss_fn(net(X[:, :-1]), X[:, lag:, i:i+1])
+        mse = loss_fn(net(X[:, :-1]), X[:, lag:, i:i+1]) # 基于滞后值计算均方误差
         ridge = ridge_regularize(net, lam_ridge) # 对除了第一层以外的层进行L2正则化
         smooth = mse + ridge # 计算平滑损失，结合了MSE和L2
         mse_list.append(mse)
         smooth_list.append(smooth)
         # 对第一层的权重矩阵进行正则化
         with torch.no_grad():
-            nonsmooth = regularize(net, lam, penalty) # 对第一层进行Lasso
+            nonsmooth = regularize(net, lam, penalty) # 正则化之后的值
             loss = smooth + nonsmooth # 计算总损失，模型的目标应该是最小化总损失
             loss_list.append(loss) 
 
-    # Set up lists for loss and mse.
     with torch.no_grad():
         loss_mean = sum(loss_list) / p
         mse_mean = sum(mse_list) / p
@@ -252,6 +256,7 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
     # 线搜索
     line_search = begin_line_search
 
+    # For line search criterion.
     done = [False for _ in range(p)] # 记录每个网络是否已经收敛
     # 声明线搜索参数
     assert 0 < sigma <= 1
@@ -285,6 +290,7 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
 
             while not step:
                 # 对当前网络的参数进行梯度下降更新。
+                # zip用于从两个可迭代对象各取出一个参数，形成一个元组
                 for param, temp_param in zip(net.parameters(),
                                              net_copy.parameters()):
                     temp_param.data = param - lr_it * param.grad
@@ -294,7 +300,7 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
 
                 # 重新计算一遍损失
                 mse = loss_fn(net_copy(X[:, :-1]), X[:, lag:, i:i+1])
-                ridge = ridge_regularize(net_copy, lam_ridge)
+                ridge = ridge_regularize(net_copy, lam_ridge) # 对除了第一层以外的层进行L2正则化
                 smooth = mse + ridge
                 with torch.no_grad():
                     nonsmooth = regularize(net_copy, lam, penalty)
@@ -307,6 +313,7 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
 
                 # 如果当前损失小于上一次的损失减去容忍度，则接受这次更新。
                 comp = loss_list[i] if monotone else max(last_losses[i])
+                # 如果线搜索条件满足
                 if not line_search or (comp - loss) > tol:
                     step = True
                     if verbose > 1:
@@ -327,11 +334,11 @@ def train_model_gista(cmlp, X, lam, lam_ridge, lr, penalty, max_iter,
                         if len(last_losses[i]) == m:
                             last_losses[i].pop(0)
                         last_losses[i].append(loss)
-                # 如果未接受这次更新，则减小学习率，直到学习率小于lr_min。
+                # 如果条件不满足，则减小学习率，直到学习率小于lr_min。
                 else:
                     lr_it *= r
                     if lr_it < lr_min:
-                        done[i] = True
+                        done[i] = True # 将该网络标记为已经收敛
                         new_mse_list.append(mse_list[i])
                         new_smooth_list.append(smooth_list[i])
                         new_loss_list.append(loss_list[i])
@@ -453,31 +460,29 @@ def train_model_ista(cmlp, X, lr, max_iter, lam=0, lam_ridge=0, penalty='H',
     loss_fn = nn.MSELoss(reduction='mean')
     train_loss_list = []
 
-    # For early stopping.
+    # 早停机制
     best_it = None
     best_loss = np.inf
     best_model = None
 
-    # Calculate smooth error.
     loss = sum([loss_fn(cmlp.networks[i](X[:, :-1]), X[:, lag:, i:i+1])
                 for i in range(p)])
     ridge = sum([ridge_regularize(net, lam_ridge) for net in cmlp.networks])
     smooth = loss + ridge
 
-    for it in range(max_iter):
-        # Take gradient step.
-        smooth.backward()
-        for param in cmlp.parameters():
+    for it in range(max_iter): 
+        smooth.backward() # 反向传播
+        for param in cmlp.parameters(): # 手动更新参数
             param.data = param - lr * param.grad
 
-        # Take prox step.
+        # 对第一层进行近端优化
         if lam > 0:
             for net in cmlp.networks:
                 prox_update(net, lam, lr, penalty)
 
-        cmlp.zero_grad()
+        cmlp.zero_grad() # 梯度归零
 
-        # Calculate loss for next iteration.
+        # 得到优化后模型的损失
         loss = sum([loss_fn(cmlp.networks[i](X[:, :-1]), X[:, lag:, i:i+1])
                     for i in range(p)])
         ridge = sum([ridge_regularize(net, lam_ridge) for net in cmlp.networks])
@@ -485,7 +490,7 @@ def train_model_ista(cmlp, X, lr, max_iter, lam=0, lam_ridge=0, penalty='H',
 
         # Check progress.
         if (it + 1) % check_every == 0:
-            # Add nonsmooth penalty.
+            # 增加非平滑损失（第一层的Lass值）
             nonsmooth = sum([regularize(net, lam, penalty)
                              for net in cmlp.networks])
             mean_loss = (smooth + nonsmooth) / p
@@ -497,7 +502,7 @@ def train_model_ista(cmlp, X, lr, max_iter, lam=0, lam_ridge=0, penalty='H',
                 print('Variable usage = %.2f%%'
                       % (100 * torch.mean(cmlp.GC().float())))
 
-            # Check for early stopping.
+            # 检查是否早停
             if mean_loss < best_loss:
                 best_loss = mean_loss
                 best_it = it

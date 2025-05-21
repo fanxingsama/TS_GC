@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import data_loader.data_loaders as module_data
 import model.model as module_arch
-from model.k_means import K_means_analyze
+from model.transformer import K_means_analyze
 import os
 import pandas as pd
 from copy import deepcopy

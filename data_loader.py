@@ -23,23 +23,46 @@ class TimeSeriesDataloader():
         self.df_b = pd.read_csv(gc_dir, header=None) # 读取真实的格兰杰因果矩阵
         self.series_num = self.df_a.shape[1] # 获取序列数量
         
-        X_np = self.df_a.values  # 获取所有的数据点
-        self.scaler = preprocessing.MinMaxScaler(feature_range=(0, 1)) # 归一化
-        X_np = self.scaler.fit_transform(X_np)
-
-        # T：时间序列数量，P：时间序列长度
-        self.X_np = X_np[:, :, np.newaxis] # 给序列增加一个新的维度，最后一个维度是序列的特征数量，X_np表示每一个序列的形状: [series_len, series_num, 1]
+        self.X_np = self.df_a.values  # 获取所有的数据点
         
     #  划分数据集
     def split_sampler(self):
-        # 分割数据
+        # 首先进行数据划分（不进行归一化）
         X_train_val_np, X_test_np = train_test_split(self.X_np, test_size=0.2, random_state=self.DATA_SEED, shuffle=False)
         X_train_np, X_val_np = train_test_split(X_train_val_np, test_size=0.25, random_state=self.DATA_SEED, shuffle=False)
         
+        # 初始化每个时间序列的缩放器列表
+        scalers = []
+        
+        # 创建转换后的数组
+        X_train_scaled = np.zeros_like(X_train_np)
+        X_val_scaled = np.zeros_like(X_val_np)
+        X_test_scaled = np.zeros_like(X_test_np)
+        
+        # 对每个时间序列单独进行归一化
+        for i in range(self.series_num):
+            scaler = preprocessing.MinMaxScaler(feature_range=(0, 1))
+            # 只使用训练集拟合缩放器
+            scaler.fit(X_train_np[:, i].reshape(-1, 1))
+            scalers.append(scaler)
+            
+            # 应用相同的缩放器到所有数据集的对应列
+            X_train_scaled[:, i] = scaler.transform(X_train_np[:, i].reshape(-1, 1)).flatten()
+            X_val_scaled[:, i] = scaler.transform(X_val_np[:, i].reshape(-1, 1)).flatten()
+            X_test_scaled[:, i] = scaler.transform(X_test_np[:, i].reshape(-1, 1)).flatten()
+        
+        # 存储缩放器，以便后续使用（如反归一化）
+        self.scalers = scalers
+        
+        # 添加特征维度
+        X_train_scaled = X_train_scaled[:, :, np.newaxis]  # 形状: [series_len, series_num, 1]
+        X_val_scaled = X_val_scaled[:, :, np.newaxis]
+        X_test_scaled = X_test_scaled[:, :, np.newaxis]
+        
         # --- 构造模型可接收的输入 ---
-        X_train_seq, y_train_seq = create_sequences(X_train_np, self.input_window, self.output_window) # [num_samples, input_window, series_num, feature_num]
-        X_val_seq, y_val_seq = create_sequences(X_val_np, self.input_window, self.output_window)
-        X_test_seq, y_test_seq = create_sequences(X_test_np, self.input_window, self.output_window)
+        X_train_seq, y_train_seq = create_sequences(X_train_scaled, self.input_window, self.output_window)
+        X_val_seq, y_val_seq = create_sequences(X_val_scaled, self.input_window, self.output_window)
+        X_test_seq, y_test_seq = create_sequences(X_test_scaled, self.input_window, self.output_window)
 
         # 转换为 PyTorch 张量
         X_train_tensor = torch.tensor(X_train_seq, dtype=torch.float32)
@@ -55,48 +78,55 @@ class TimeSeriesDataloader():
         test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
         
         # 创建数据加载器
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True) # 为了确保 PGD 状态的一致性，丢弃最后一个批次（如果处理得当可以移除）
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, drop_last=True)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
         
         # 返回训练集和验证集的采样器
-        return train_loader, val_loader, test_loader # [batch_size, num_samples, input_window, series_num, feature_num]
+        return train_loader, val_loader, test_loader
     
-    def inverse_transform(self, data):
+    def inverse_transform(self, data, series_indices=None):
         """
-        将归一化后的数据转换回原始尺度
+        将归一化的数据转换回原始尺度
         
         参数:
-        - data: 形状为 [batch_size, output_window, series_num, feature_dim] 的数据
-            或 [samples, output_window, series_num, feature_dim] 的numpy数组
-            
+        - data: 形状为 [batch_size, sequence_len, series_num, 1] 的数据
+        - series_indices: 指定要转换的时间序列索引列表，默认转换所有序列
+        
         返回:
-        - 转换回原始尺度的数据
+        - 逆变换后的数据
         """
-        batch_size = data.shape[0]
-        output_window = data.shape[1]
-        series_num = data.shape[2]
-        feature_dim = data.shape[3]
+        if series_indices is None:
+            series_indices = range(self.series_num)
+            
+        # 确保scalers已经初始化
+        if not hasattr(self, 'scalers'):
+            raise ValueError("请先调用split_sampler方法初始化scalers")
+            
+        data_copy = data.copy()
         
-        # 重塑数据以适应scaler的输入格式 [sample, features]
-        # 我们需要将形状从 [batch_size, output_window, series_num, feature_dim] 改变为 [batch_size*output_window, series_num]
-        data_reshaped = data.reshape(batch_size * output_window, series_num, feature_dim).squeeze(-1)
-        
-        # 应用inverse_transform
-        if isinstance(data, torch.Tensor):
-            data_reshaped_np = data_reshaped.cpu().numpy()
-            inverse_data = self.scaler.inverse_transform(data_reshaped_np)
-            # 重塑回原始维度
-            inverse_data = inverse_data.reshape(batch_size, output_window, series_num)
-            inverse_data = np.expand_dims(inverse_data, -1)  # 添加feature_dim维度
-            return inverse_data
-        else:  # 如果已经是numpy数组
-            inverse_data = self.scaler.inverse_transform(data_reshaped)
-            # 重塑回原始维度
-            inverse_data = inverse_data.reshape(batch_size, output_window, series_num)
-            inverse_data = np.expand_dims(inverse_data, -1)  # 添加feature_dim维度
-            return inverse_data
-        
+        # 处理不同维度的情况
+        if data.ndim == 4:  # [batch_size, sequence_len, series_num, 1]
+            for i, idx in enumerate(series_indices):
+                scaler = self.scalers[idx]
+                # 处理每个批次和每个时间步
+                for b in range(data.shape[0]):
+                    for t in range(data.shape[1]):
+                        data_copy[b, t, idx, 0] = scaler.inverse_transform(
+                            data[b, t, idx, 0].reshape(-1, 1)
+                        ).flatten()[0]
+        elif data.ndim == 3:  # [sequence_len, series_num, 1]
+            for i, idx in enumerate(series_indices):
+                scaler = self.scalers[idx]
+                for t in range(data.shape[0]):
+                    data_copy[t, idx, 0] = scaler.inverse_transform(
+                        data[t, idx, 0].reshape(-1, 1)
+                    ).flatten()[0]
+        else:
+            raise ValueError(f"不支持的数据维度: {data.ndim}")
+            
+        return data_copy
+      
 # --- 辅助函数：创建序列 (适配 CausalFormer 输入输出) ---
 def create_sequences(data, input_window, output_window): # data:  [series_len, series_num, feature_num]。
     xs, ys = [], []

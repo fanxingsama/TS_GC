@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 from pathlib import Path
+import re
 import joblib
 from sklearn import preprocessing
 import torch
@@ -11,35 +9,44 @@ from matplotlib import rcParams
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from visual.causalMatrix import compare_causality_csvs, visualize_single_causality_csv
 from model.Granger_causalFormer import PredictModel
-from data_loader import TimeSeriesDataloader
 import pandas as pd
 import os
-
+from config import DEVICE, timeseriesDataLoader, series_num
 # 设置 Matplotlib 中文显示
-rcParams['font.family'] = 'Microsoft YaHei'
+rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
 # 加载模型
-def load_model(config, best_params, device):
-    """
-    根据最佳参数加载模型
-    """
-    # 从最佳参数中提取模型参数
-    d_model = best_params['d_model']
-    n_head = best_params['n_head']
-    n_layers = best_params['n_layers']
-    ffn_hidden = best_params['ffn_hidden']
-    dropout = best_params['dropout']
-    tau = best_params['tau']
+def load_model(model_path, device):
+    # 加载参数
+    saved_config = joblib.load(model_path / "model_config.pkl")
     
-    # GrangerTCN 参数
-    tcn_channels = best_params['tcn_channels']
-    tcn_kernel_size = best_params['tcn_kernel_size']
-    tcn_dropout = best_params['tcn_dropout']
+    input_window = saved_config['input_window']
+    output_window = saved_config['output_window']
+    series_num = saved_config['series_num']
+    feature_dim = saved_config['feature_dim']
+    output_dim = saved_config['output_dim'] 
+
+    # transformer参数
+    d_model = saved_config['d_model']
+    n_head = saved_config['n_head']
+    n_layers = saved_config['n_layers']
+    ffn_hidden = saved_config['ffn_hidden']
+    dropout = saved_config['dropout'] 
+    tau = saved_config['tau']
     
-    # 创建并返回模型
+    # TCN 参数
+    tcn_channels = saved_config['tcn_channels'] 
+    tcn_kernel_size = saved_config['tcn_kernel_size']
+    tcn_dropout = saved_config['tcn_dropout']
+    
     model = PredictModel(
-        config=config,
+        input_window=input_window,
+        output_window=output_window,
+        series_num=series_num,
+        feature_dim=feature_dim,
+        output_dim=output_dim,
+        device=device,  
         d_model=d_model,
         n_head=n_head,
         n_layers=n_layers,
@@ -47,10 +54,16 @@ def load_model(config, best_params, device):
         tcn_kernel_size=tcn_kernel_size,
         tcn_dropout=tcn_dropout,
         ffn_hidden=ffn_hidden,
-        drop_prob=dropout,
+        dropout=dropout, 
         tau=tau
     ).to(device)
     
+    # model = PredictModel2(
+    #     config=config
+    # ).to(device)
+    
+    model_weight_path = model_path / "best_model.pth"
+    model.load_state_dict(torch.load(model_weight_path, map_location=device))
     return model
 
 # 采用真阳和假阳评估指标
@@ -128,18 +141,13 @@ def evaluate(logger, gtfile, validatedcauses, columns):
     return FP, TP, FPdirect, TPdirect, FN, FPs, FPsdirect, TPs, TPsdirect, FNs, F1, F1direct
 
 # 评估模型
-def evaluate_model(model, test_loader, device, series_num, dataloader, max_samples=100):
+def evaluate_model(model, test_loader, device, max_samples=200):
     model.eval()
     
     # 用于存储结果的字典
     results = {
         'predictions': [], # 模型预测值
         'targets': [], # 数据集真实值
-        'predictions_original_scale': [], # 反归一化后的预测值
-        'targets_original_scale': [], # 反归一化后的真实值
-        'mse_per_series': [],
-        'mae_per_series': [],
-        'r2_per_series': []
     }
     
     # 获取测试数据上的预测结果
@@ -149,10 +157,10 @@ def evaluate_model(model, test_loader, device, series_num, dataloader, max_sampl
             batch_x, batch_y = batch_x.to(device), batch_y.to(device)
             
             # 获取预测结果
-            predictions = model(batch_x)
+            predictions = model(batch_x) # predictions:[batch_size, output_window, series_num, output_dim]
             
-            # 将预测结果和真实值存储到 CPU 上
-            results['predictions'].append(predictions.cpu().numpy())
+            # 将预测结果和真实值变numpy格式，存储到 CPU 上
+            results['predictions'].append(predictions.cpu().numpy()) # [max_samples, output_window, series_num, output_dim]
             results['targets'].append(batch_y.cpu().numpy())
             
             # 就只要100个样本数
@@ -160,28 +168,9 @@ def evaluate_model(model, test_loader, device, series_num, dataloader, max_sampl
             if sample_count >= max_samples:
                 break
     
-    # 将结果拼接为完整的数组
+    # 将结果拼接为连续的numpy数组
     results['predictions'] = np.concatenate(results['predictions'], axis=0)[:max_samples]
     results['targets'] = np.concatenate(results['targets'], axis=0)[:max_samples]
-    
-    # 反归一化预测和目标数据
-    # results['predictions_original_scale'] = dataloader.inverse_transform(results['predictions'])
-    # results['targets_original_scale'] = dataloader.inverse_transform(results['targets'])
-    
-    # 计算每个时间序列的评估指标（使用原始尺度的数据计算指标）
-    for i in range(series_num):
-        # 得到当前序列的预测值和真实值（使用原始尺度）
-        pred_series = results['predictions'][:, 0, i, 0]  # [samples, output_window=1, series_num, output_dim=1]
-        target_series = results['targets'][:, 0, i, 0]
-        
-        # 计算指标
-        mse = mean_squared_error(target_series, pred_series)
-        mae = mean_absolute_error(target_series, pred_series)
-        r2 = r2_score(target_series, pred_series)
-        
-        results['mse_per_series'].append(mse) # 计算均方误差
-        results['mae_per_series'].append(mae) # 计算平均绝对误差
-        results['r2_per_series'].append(r2) # 计算R2分数
     
     return results
 
@@ -209,7 +198,7 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
                         cause_effect_pairs.append({
                             'source': f'{cause_idx}',
                             'target': f'{effect_idx}',
-                            'Strength': strength
+                            'Strength': round(strength, 2)
                         })
         df = pd.DataFrame(cause_effect_pairs)
         # 按照 'Cause' 排序，如果 'Cause' 相同，则按照 'Effect' 排序
@@ -229,7 +218,7 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
                                 'Cause': f'Series_{cause_idx}',
                                 'Effect': f'Series_{effect_idx}',
                                 'lag': lag,
-                                'Strength': strength
+                                'Strength': round(strength, 2)
                             })
         df = pd.DataFrame(cause_effect_pairs)
         # 按照 'Cause' 排序，然后 'Effect'，最后 'lag'
@@ -240,7 +229,7 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
     visualize_single_causality_csv(csv_path, matrix_png_save_path, show=False)
 
 # 绘制预测结果和真实值的时序序列对比图
-def plot_predictions(results, series_num, plot_indices, save_path=None):
+def plot_predictions(results, series_num, plot_indices, save_path):
     """
     Args:
         results: 包含预测结果和真实值的字典
@@ -272,10 +261,11 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
         plt.plot(time_steps, pred_series, 'r--', label='预测值', linewidth=2)
         
         # 添加指标信息
-        mse = results['mse_per_series'][idx]
-        mae = results['mae_per_series'][idx]
-        r2 = results['r2_per_series'][idx]
-        plt.title(f'时间序列 {idx+1}: MSE={mse:.4f}, MAE={mae:.4f}, R²={r2:.4f}')
+        # mse = results['mse_per_series'][idx]
+        # mae = results['mae_per_series'][idx]
+        # r2 = results['r2_per_series'][idx]
+        # plt.title(f'时间序列 {idx+1}: MSE={mse:.4f}, MAE={mae:.4f}, R²={r2:.4f}')
+        plt.title(f'时间序列 {idx+1}')
         
         plt.xlabel('时间步')
         plt.ylabel('值')
@@ -283,77 +273,42 @@ def plot_predictions(results, series_num, plot_indices, save_path=None):
         plt.legend()
     
     plt.tight_layout()
-    
-    # 保存图表
-    if save_path:
-        plt.savefig(save_path)
-        print(f"预测结果已保存到: {save_path}")
-    
-    plt.show()
+    plt.savefig(save_path)
 
-def main(png_save_path):
-    data_path = 'data/fMRI/timeseries9.csv'
-    gc_dir = 'data/fMRI/sim9_gt_processed.csv'
-    BATCH_SIZE = 64
-    DATA_SEED = 42
-    INPUT_WINDOW = 10
-    OUTPUT_WINDOW = 1
-    FEATURE_DIM = 1
-    OUTPUT_DIM = 1
+# 获取最新的run_id
+def get_latest_run_id_simple():
+    base_path = Path('saved')
+    if not base_path.exists():
+        return None
     
-    # 设置设备
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"使用设备: {device}")
+    # 获取所有符合格式的目录名
+    pattern = re.compile(r'^\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
+    timestamps = [d.name for d in base_path.iterdir() 
+                 if d.is_dir() and pattern.match(d.name)]
     
-    # 加载数据
-    timeseriesDataLoader = TimeSeriesDataloader(data_dir=data_path, gc_dir=gc_dir, batch_size=BATCH_SIZE, 
-                                            DATA_SEED=DATA_SEED, input_window=INPUT_WINDOW, output_window=OUTPUT_WINDOW)
-    
-    # 获取数据加载器和序列数量
-    _, _, test_loader = timeseriesDataLoader.split_sampler()
-    series_num = timeseriesDataLoader.series_num
-    
+    return max(timestamps) if timestamps else None
+
+def main(model_path):
+    train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler()
     print(f"时间序列数量: {series_num}")
     print(f"测试集数据大小: {len(test_loader.dataset)}")
+
+    model = load_model(model_path, DEVICE) # 构建模型
     
-    # 加载模型最佳参数
-    best_params_file = png_save_path / "best_params.pkl"
-    best_params = joblib.load(best_params_file)
-    config = {
-        'data_loader': {
-            'args': {
-                'input_window': INPUT_WINDOW,
-                'output_window': OUTPUT_WINDOW,
-                'feature_dim': FEATURE_DIM,
-                'output_dim': OUTPUT_DIM,
-                'series_num': series_num
-            }
-        },
-        'device': device.type
-    }
-    model = load_model(config, best_params, device) # 构建模型
-    
-    # 评估模型 - 传入数据加载器以便进行反归一化
-    results = evaluate_model(model, test_loader, device, series_num, timeseriesDataLoader, max_samples=100)
-    
-    # 计算总体指标
-    overall_mse = np.mean(results['mse_per_series'])
-    overall_mae = np.mean(results['mae_per_series'])
-    overall_r2 = np.mean(results['r2_per_series'])
-    
-    print("\n总体模型性能:")
-    print(f"平均 MSE: {overall_mse:.6f}")
-    print(f"平均 MAE: {overall_mae:.6f}")
-    print(f"平均 R²: {overall_r2:.6f}")
+    # 评估模型
+    results = evaluate_model(model, test_loader, DEVICE, max_samples=200)
     
     # 得到格兰杰因果关系
-    save_gc_to_csv(model, series_num, png_save_path, threshold=True, ignore_kernel=True)
+    save_gc_to_csv(model, series_num, model_path, threshold=False, ignore_kernel=True)
     
     # 选择前5个序列进行绘制
     plot_indices = list(range(min(5, series_num)))
-    plot_predictions(results, series_num, plot_indices, save_path= png_save_path / "model_predict.png")
+    plot_predictions(results, series_num, plot_indices, save_path= model_path / "model_predict.png")
+
+
 
 if __name__ == "__main__":
-    run_id = "05-16_11-12-28"  # 
-    png_save_path = Path('saved') / run_id
-    main(png_save_path)
+    run_id = get_latest_run_id_simple()
+    # run_id = '05-20_22-10-15'
+    model_path = Path('saved') / run_id
+    main(model_path)

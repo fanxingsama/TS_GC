@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import math
-from .TCN_granger.granger_tcn_model import GrangerTCN
+from .granger_tcn import GrangerTCN
 
 
 Linear = nn.Linear
@@ -110,6 +110,8 @@ class MultiHeadAttention(nn.Module):
         self.d_tensor = d_model // n_head
         self.tau = tau
         self.device = device
+        # 构建注意力对象
+        self.count_attention = MultiVariateCausalAttention(self.d_tensor, self.tau)
 
         self.Wq = Linear(in_features=self.d_model, out_features=self.d_model, bias=True) # 将输入特征投影到不同的表示空间，加入线性之后方便训练W矩阵
         self.Wk = Linear(in_features=self.d_model, out_features=self.d_model, bias=True) 
@@ -124,15 +126,12 @@ class MultiHeadAttention(nn.Module):
         self.tcn_processors = nn.ModuleList()
         for i in range(self.series_num):
             self.tcn_processors.append(
-                GrangerTCN(input_series_num=self.series_num - 1, # 每个TCN的输入是除了目标序列之外的所有序列 (series_num - 1)
+                GrangerTCN(input_series_num=self.series_num - 1, 
                           output_size=tcn_channels, # TCN所提取到的特征数
                           TCN_hidden_channels=tcn_channels, # TCN中间层的通道数
                           kernel_size=tcn_kernel_size, 
                           dropout=tcn_dropout)
             )
-
-        # 构建注意力对象
-        self.count_attention = MultiVariateCausalAttention(self.d_tensor, self.tau)
 
     # 将输入张量拆分为多个头，以便进行多头注意力计算
     def split(self, tensor):
@@ -165,7 +164,7 @@ class MultiHeadAttention(nn.Module):
         Returns:
             torch.Tensor: 多头注意力的输出 [batch_size, series_num, input_window, feature_dim]。
         """
-        q, k = self.Wq(q_emb), self.Wk(k_emb) # Q和K的线性变换
+        
 
         # 如果特征维度大于1，则只取第一个特征维度作为 TCN 的输入，如果特征维度为1，则直接去掉最后一个维度
         x_tcn_input = x_input.squeeze(-1) if self.feature_dim == 1 else x_input[..., 0] # 去掉feature_dim维度，最终的输入维度：[batch_size, series_num, input_window]
@@ -179,6 +178,7 @@ class MultiHeadAttention(nn.Module):
             other_series = x_tcn_input[:, mask, :]
             
             tcn_out = self.tcn_processors[i](other_series)  # tcn_out:[batch_size, output_size, series_len]
+            # tcn_out = self.tcn_processors[i](x_tcn_input)
             all_tcn_outputs.append(tcn_out)
         
         # 堆叠所有TCN输出
@@ -188,7 +188,8 @@ class MultiHeadAttention(nn.Module):
         # 使用线性层 Wv 将 TCN 的输出投影到与 d_model 相同的维度。
         v_temp = self.Wv(tcn_output)  # [batch_size, series_len, series_num, d_model]
         v = v_temp.permute(0, 2, 1, 3)  # 维度顺序调整，[batch_size, series_num, series_len, d_model]
-
+        
+        q, k = self.Wq(q_emb), self.Wk(k_emb) # Q和K的线性变换
         q, k, v = self.split(q), self.split(k), self.split(v) # 将Q、K、V拆分为多头，以便进行多头注意力计算
 
         out, attn_weights = self.count_attention(q, k, v) # 计算多头注意力
@@ -305,9 +306,9 @@ class Encoder(nn.Module):
     def forward(self, x):
         # x: [batch_size, series_num, input_window, feature_dim]
         embedding = self.emb(x) # [batch_size, series_num, d_model]
-        out = x
+        out = None
         for layer in self.layers:
-            out = layer(embedding, out)
+            out = layer(embedding, x)
         return out
         # 输出 x: [batch_size, series_num, input_window, feature_dim]
 
@@ -326,18 +327,33 @@ class PredictModel(nn.Module):
         drop_prob (float): Dropout 概率
         tau (float): 注意力 softmax 温度
     """
-    def __init__(self, config, d_model, n_head, tcn_channels, tcn_kernel_size, tcn_dropout, n_layers, ffn_hidden, drop_prob, tau):
+    def __init__(self, input_window, output_window, series_num, feature_dim, output_dim, device,
+                 d_model, n_head, tcn_channels, tcn_kernel_size, tcn_dropout,
+                 n_layers, ffn_hidden, dropout, tau):
         super().__init__()
-        self.config = config
-        self.data_feature = config['data_loader']['args']
-        self.input_window = self.data_feature.get('input_window')
-        self.output_window = self.data_feature.get('output_window')
-        self.series_num = self.data_feature.get('series_num')
-        self.feature_dim = self.data_feature.get('feature_dim')
-        self.output_dim = self.data_feature.get('output_dim')
+        self.input_window = input_window
+        self.output_window = output_window
+        self.series_num = series_num
+        self.feature_dim = feature_dim
+        self.output_dim = output_dim
+        self.device = device
 
-        device_str = config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
-        self.device = torch.device(device_str)
+        self.config = {
+            'input_window': self.input_window,
+            'output_window': self.output_window,
+            'series_num': self.series_num,
+            'feature_dim': self.feature_dim,
+            'output_dim': self.output_dim,
+            'd_model': d_model,
+            'n_head': n_head,
+            'tcn_channels': tcn_channels,
+            'tcn_kernel_size': tcn_kernel_size,
+            'tcn_dropout': tcn_dropout,
+            'n_layers': n_layers,
+            'ffn_hidden': ffn_hidden,
+            'dropout': dropout,
+            'tau': tau
+        }
 
         self.encoder = Encoder(series_num=self.series_num,
                                input_window=self.input_window,
@@ -349,7 +365,7 @@ class PredictModel(nn.Module):
                                tcn_dropout=tcn_dropout,
                                n_layers=n_layers,
                                ffn_hidden=ffn_hidden,
-                               drop_prob=drop_prob,
+                               drop_prob=dropout,
                                tau=tau,
                                device=self.device)
 
@@ -364,7 +380,7 @@ class PredictModel(nn.Module):
         encoder_out = self.encoder(x) # 编码器处理输入序列，生成整个序列的编码表示，[batch_size, series_num, input_window, feature_dim]
         last_step_out = encoder_out[:, :, -1, :] # 提取input_window上最后一个时间步的输出，用于预测未来。[batch_size, series_num, feature_dim]
         out = self.fc(last_step_out) # 全连接，将 feature_dim 的特征向量映射到输出值维度 output_dim（这里是1，表示单步预测单个值）。[batch_size, series_num, output_dim]
-        out = out.unsqueeze(1) # [batch_size, 1, series_num, output_dim]
+        out = out.unsqueeze(1) # [batch_size, 1, series_num, output_dim] # 输出的窗口是1，输出一个值
         if self.output_window > 1:
             out = out.repeat(1, self.output_window, 1, 1)
         return out # [batch_size, output_window, series_num, output_dim]
@@ -377,24 +393,47 @@ class PredictModel(nn.Module):
         ignore_kernel=False时，会保留不同时间延迟的细节信息，输出一个形状为 (series_num, series_num, kernel_size) 的矩阵，每个元素 (i,j,k) 表示从序列 j 在延迟 k 时间点对序列 i 的格兰杰因果影响
         threshold代表是否要把格兰杰因果矩阵的权重值进行转换，为True时中的所有非零值转换为 1，零值保持为 0，为 False，则返回原始的格兰杰因果矩阵，其中的值表示因果关系的强度。
         '''
-        gc_matrix = torch.zeros(self.series_num, self.series_num, device='cuda:0')
-        
-        for i in range(self.series_num):  # 目标序列
-            weights = self.encoder.layers[0].attention.tcn_processors[i].get_first_block_conv1_weights()  # [output_feature, input_channels, kernel_size]
+        device_to_use = self.device # 或者直接使用 PredictModel 的 device 属性
+
+        if ignore_kernel:
+            gc_matrix = torch.zeros(self.series_num, self.series_num, device=device_to_use)
+        else:
+            # 尝试获取kernel_size，如果tcn_processors为空则使用默认或报错
+            if not self.encoder.layers[0].attention.tcn_processors:
+                raise ValueError("TCN processors list is empty, cannot determine kernel size for GC matrix.")
+            kernel_s = self.encoder.layers[0].attention.tcn_processors[0].get_first_block_conv1_weights().shape[2]
+            gc_matrix = torch.zeros(self.series_num, self.series_num, kernel_s, device=device_to_use)
+
+        for i in range(self.series_num):  # 目标序列 (target series index)
+            # 检查 tcn_processors 是否为空或者索引是否有效
+            if i >= len(self.encoder.layers[0].attention.tcn_processors):
+                # print(f"Warning: Target index {i} is out of bounds for tcn_processors.")
+                continue # 或者其他错误处理
             
-            # 直接在input_channels维度上计算影响
-            for j in range(self.series_num):  # 源序列
-                if j != i and j < weights.shape[1]:  # 排除自身影响且确保索引在范围内
+            weights = self.encoder.layers[0].attention.tcn_processors[i].get_first_block_conv1_weights()
+            # weights.shape: [output_feature, series_num - 1, kernel_size]
+
+            current_tcn_channel_idx = 0
+            for j in range(self.series_num): 
+                if i == j:  # 排除自身对自身的影响（通常格兰杰因果不考虑这个）
+                    continue
+
+                # 此时 current_tcn_channel_idx 对应于全局源序列 j 在 TCN 输入中的局部通道索引
+                # 确保 current_tcn_channel_idx 没有超出 weights 的实际输入通道维度
+                if current_tcn_channel_idx < weights.shape[1]:
                     if ignore_kernel:
-                        # 计算序列j对序列i的总体影响（跨所有output_feature和time_delays）
-                        # 沿output_feature和kernel_size维度计算norm
-                        gc_matrix[i, j] = torch.norm(weights[:, j, :])  # 这相当于计算所有output_feature和所有time_delay的综合影响
+                        gc_matrix[i, j] = torch.norm(weights[:, current_tcn_channel_idx, :])
                     else:
-                        # 保留时间延迟维度
-                        for k in range(weights.shape[2]):  # 遍历kernel_size
-                            gc_matrix[i, j, k] = torch.norm(weights[:, j, k])  # 计算特定time_delay的影响
-        # print("GC matrix:", gc_matrix)
+                        for k_idx in range(weights.shape[2]):  # 遍历kernel_size (时间延迟)
+                            gc_matrix[i, j, k_idx] = torch.norm(weights[:, current_tcn_channel_idx, k_idx])
+                else:
+                    # This case should ideally not be reached if logic is perfect and series_num > 1
+                    # print(f"Warning: current_tcn_channel_idx {current_tcn_channel_idx} out of bounds for weights.shape[1] {weights.shape[1]} (target {i}, source {j})")
+                    pass
+
+                current_tcn_channel_idx += 1
+        
         if threshold:
             return (gc_matrix > weight_threshold).int()
         else:
-            return gc_matrix # [series_num, series_num]，如果ignore_kernel=False，形状为 [series_num, series_num, kernel_size]
+            return gc_matrix

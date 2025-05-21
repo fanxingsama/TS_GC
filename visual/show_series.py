@@ -1,121 +1,116 @@
+from matplotlib import rcParams
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib import rcParams
-import re  # 导入正则表达式模块
-import numpy as np  # 导入numpy用于数据处理
-import math  # 导入math用于计算子图排列
+import numpy as np
+import argparse
+import os
 
-# 设置字体为SimHei，这是Windows系统常用的中文字体
 rcParams['font.family'] = 'SimHei'
-rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
-
-# 读取CSV文件
-file_path = '1744883745.csv'  # 替换为你的文件路径
-data = pd.read_csv(file_path)
-
-# 打印列名，方便用户选择
-print("可用的列名：")
-print(data.columns.tolist())
-
-# 预处理列名，忽略大小写、下划线和后缀
-def preprocess_column_name(col_name):
-    # 去掉后缀（如.PV）
-    col_name = re.sub(r'\.(PV|OUT|SV)$', '', col_name)
-    # 去掉下划线
-    col_name = col_name.replace('_', '')
-    # 转换为小写
-    col_name = col_name.lower()
-    return col_name
-
-# 预处理所有列名
-preprocessed_columns = {preprocess_column_name(col): col for col in data.columns}
-
-# 用户输入多个列名，用逗号分隔
-user_input = input("请输入要可视化的列名，多个列名用逗号分隔（例如：fic1123,fic2234），或输入 * 显示前8列：").strip().lower()
-
-matched_columns = []
-
-# 检查是否为通配符 "*"
-if user_input == "*":
-    # 如果输入是 "*"，则取数据框的前8列
-    matched_columns = data.columns[:8].tolist()
-    print("将显示前8列数据：")
-    for col in matched_columns:
-        print(f"- {col}")
-else:
-    # 否则按用户输入的列名进行匹配
-    column_inputs = [name.strip() for name in user_input.split(',')]
+rcParams['axes.unicode_minus'] = False
+def visualize_time_series(file_path, selected_columns=None, sequence_length=None):
+    """
+    可视化多变量时序序列CSV文件
     
-    # 检查每个输入列名是否匹配
-    for col_input in column_inputs:
-        if col_input in preprocessed_columns:
-            target_column = preprocessed_columns[col_input]
-            matched_columns.append(target_column)
-            print(f"匹配到的列名：{target_column}")
-        else:
-            print(f"警告：未找到匹配的列名 '{col_input}'！")
-
-# 如果没有匹配到任何列，则退出
-if not matched_columns:
-    print("错误：未找到任何匹配的列名！")
-    exit()
-
-# 限制最多只能选择8个序列
-if len(matched_columns) > 8:
-    print(f"警告：选择的序列超过8个，将只显示前8个序列")
-    matched_columns = matched_columns[:8]
-
-# 用户输入要显示的数据点数量
-try:
-    num_points = int(input(f"请输入要显示的数据点数量（最大 {len(data)}）："))
-    if num_points <= 0:
-        print("错误：数据点数量必须大于0！")
-    else:
-        # 限制数据点数量不超过数据长度
-        num_points = min(num_points, len(data))
-
-        # 计算子图布局
-        n_cols = min(4, len(matched_columns))  # 每行最多4个子图
-        n_rows = math.ceil(len(matched_columns) / n_cols)  # 根据序列数量计算需要的行数
+    参数:
+    file_path (str): CSV文件路径
+    selected_columns (list): 需要可视化的列名列表，如果为None则提示用户选择
+    sequence_length (int): 要显示的序列长度，如果为None则显示全部
+    """
+    try:
+        # 读取CSV文件
+        df = pd.read_csv(file_path)
         
-        # 创建图表，子图之间留出足够的空间
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 5*n_rows), squeeze=False)
+        # 获取所有列名（序列名）
+        all_columns = df.columns.tolist()
         
-        # 为每个匹配的列创建单独的子图
-        for i, column in enumerate(matched_columns):
-            # 计算当前子图的行和列索引
-            row = i // n_cols
-            col = i % n_cols
+        # 如果没有指定要可视化的列，让用户交互选择
+        if selected_columns is None:
+            print("可用的序列:")
+            for i, col in enumerate(all_columns):
+                print(f"{i+1}. {col}")
             
-            # 提取数据
-            selected_data = data[column].iloc[:num_points]
-            
-            # 获取数据的基本统计信息用于设置y轴范围
-            data_mean = selected_data.mean()
-            data_std = selected_data.std()
-            y_min = data_mean - 6 * data_std
-            y_max = data_mean + 6 * data_std
-            
-            # 绘制子图
-            axes[row, col].plot(selected_data, linestyle='-', color='blue')
-            axes[row, col].set_title(column)
-            axes[row, col].set_xlabel("时间点")
-            axes[row, col].set_ylabel("值")
-            axes[row, col].grid(True, linestyle='--', alpha=0.7)
-            axes[row, col].set_ylim(y_min, y_max)
+            # 获取用户输入
+            selection = input("请输入要可视化的序列编号（用逗号分隔，例如：1,3,5）: ")
+            try:
+                # 将用户输入转换为索引列表
+                indices = [int(idx.strip()) - 1 for idx in selection.split(',')]
+                selected_columns = [all_columns[i] for i in indices if 0 <= i < len(all_columns)]
+                
+                if not selected_columns:
+                    print("未选择有效的序列，将显示所有序列")
+                    selected_columns = all_columns
+            except:
+                print("输入格式不正确，将显示所有序列")
+                selected_columns = all_columns
         
-        # 隐藏未使用的子图
-        for i in range(len(matched_columns), n_rows * n_cols):
-            row = i // n_cols
-            col = i % n_cols
-            fig.delaxes(axes[row, col])
+        # 如果没有指定序列长度，让用户交互输入
+        if sequence_length is None:
+            length_input = input(f"请输入要显示的序列长度（最大 {len(df)}，按Enter显示全部）: ")
+            try:
+                if length_input.strip():
+                    sequence_length = int(length_input)
+                    if sequence_length <= 0 or sequence_length > len(df):
+                        print(f"输入的长度无效，将显示全部长度: {len(df)}")
+                        sequence_length = len(df)
+                else:
+                    sequence_length = len(df)
+            except:
+                print(f"输入格式不正确，将显示全部长度: {len(df)}")
+                sequence_length = len(df)
         
-        # 调整布局，确保子图之间有足够的空间，标题和标签不重叠
-        plt.tight_layout(pad=3.0)
-        plt.suptitle("多序列时序数据可视化", fontsize=16, y=1.02)
+        # 截取数据
+        df_subset = df.iloc[:sequence_length]
+        
+        # 为每个选定的序列创建单独的图表
+        num_plots = len(selected_columns)
+        fig, axes = plt.subplots(num_plots, 1, figsize=(12, 3 * num_plots))
+        
+        # 如果只有一列，axes不是列表，需要转换为列表以便统一处理
+        if num_plots == 1:
+            axes = [axes]
+        
+        # 绘制每个序列
+        for i, col in enumerate(selected_columns):
+            time_index = np.arange(len(df_subset))
+            axes[i].plot(time_index, df_subset[col], 'b-', linewidth=1.5)
+            axes[i].set_title(f"时序序列: {col}")
+            axes[i].set_xlabel("时间步")
+            axes[i].set_ylabel("值")
+            axes[i].grid(True)
+        
+        plt.tight_layout()
         
         # 显示图表
         plt.show()
         
-except ValueError:
-    print("错误：请输入一个有效的整数！")
+        return True
+        
+    except Exception as e:
+        print(f"错误: {str(e)}")
+        return False
+
+def main():
+    file_path = '../data/simu_data/series_data.csv'
+    # file_path = '../data/fMRI/timeseries9.csv'
+    
+    parser = argparse.ArgumentParser(description='多变量时序序列可视化工具')
+    parser.add_argument('--columns', type=str, help='要可视化的列（用逗号分隔）')
+    parser.add_argument('--length', type=int, help='要显示的序列长度')
+    
+    args = parser.parse_args()
+    
+    # 检查文件是否存在
+    if not os.path.exists(file_path):
+        print(f"错误: 文件 '{file_path}' 不存在")
+        return
+    
+    # 解析列参数
+    selected_columns = None
+    if args.columns:
+        selected_columns = [col.strip() for col in args.columns.split(',')]
+    
+    # 可视化时序序列
+    visualize_time_series(file_path, selected_columns, args.length)
+
+if __name__ == "__main__":
+    main()
