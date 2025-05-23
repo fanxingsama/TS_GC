@@ -60,9 +60,38 @@ class TemporalBlock(nn.Module):
         # 初始化权重（可选，但通常是好的实践）
         self.init_weights() 
 
+    # 稀疏初始化
+    # def init_weights(self):
+    #     # 对第一个卷积层进行稀疏初始化
+    #     weight = self.conv1.weight
+    #     weight = weight.view(weight.shape[0], -1)  # 展平为二维
+    #     nn.init.sparse_(weight, sparsity=0.9, std=0.01)
+    #     weight = weight.view_as(self.conv1.weight)  # 重塑回原来的形状
+    #     self.conv1.weight.data = weight
+    #     if self.conv1.bias is not None:
+    #         nn.init.constant_(self.conv1.bias, 0)
+
+    #     # 对第二个卷积层进行稀疏初始化
+    #     weight = self.conv2.weight
+    #     weight = weight.view(weight.shape[0], -1)
+    #     nn.init.sparse_(weight, sparsity=0.9, std=0.01)
+    #     weight = weight.view_as(self.conv2.weight)
+    #     self.conv2.weight.data = weight
+    #     if self.conv2.bias is not None:
+    #         nn.init.constant_(self.conv2.bias, 0)
+
+    #     # 如果有下采样层，同样进行稀疏初始化
+    #     if self.downsample is not None:
+    #         weight = self.downsample.weight
+    #         weight = weight.view(weight.shape[0], -1)
+    #         nn.init.sparse_(weight, sparsity=0.9, std=0.01)
+    #         weight = weight.view_as(self.downsample.weight)
+    #         self.downsample.weight.data = weight
+    #         if self.downsample.bias is not None:
+    #             nn.init.constant_(self.downsample.bias, 0)
+    
+    # He初始化
     def init_weights(self):
-        """初始化卷积层的权重。"""
-        # 对于 PReLU 激活函数，通常使用 He 初始化
         nn.init.kaiming_normal_(self.conv1.weight, mode='fan_in', nonlinearity='leaky_relu')
         if self.conv1.bias is not None:
             nn.init.constant_(self.conv1.bias, 0)
@@ -70,10 +99,9 @@ class TemporalBlock(nn.Module):
         if self.conv2.bias is not None:
             nn.init.constant_(self.conv2.bias, 0)
 
-        # 如果存在，初始化下采样层
         if self.downsample is not None:
-             nn.init.kaiming_normal_(self.downsample.weight, mode='fan_in', nonlinearity='leaky_relu')
-             if self.downsample.bias is not None:
+            nn.init.kaiming_normal_(self.downsample.weight, mode='fan_in', nonlinearity='leaky_relu')
+            if self.downsample.bias is not None:
                 nn.init.constant_(self.downsample.bias, 0)
 
     def forward(self, x):
@@ -153,7 +181,7 @@ def PGD_update(network, lam, lr, penalty):
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
-# 计算第一层权重矩阵的正则化项，正则化是在损失函数里加入惩罚项，限制模型复杂度，让模型参数变得更简洁
+# 稀疏惩罚的结果
 def lasso_penalty(network, lam, penalty):
     hidden, p, lag = network.shape
     if penalty == 'GL': # 组Loss惩罚

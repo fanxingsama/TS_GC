@@ -47,7 +47,7 @@ class Embedding(nn.Module):
         return embedding
         # [batch_size, series_num, d_model]
 
-# 多变量因果注意力，实现注意力机制 计算核心 的模块。它接收已经准备好的Q/K/V，之后进行注意力计算，输出是注意力机制权重
+# 多变量因果注意力，实现注意力机制 计算核心 的模块。使用Q/K/V，之后进行注意力计算，输出是注意力机制权重
 class MultiVariateCausalAttention(nn.Module):
     """
     Args:
@@ -70,13 +70,13 @@ class MultiVariateCausalAttention(nn.Module):
         """
         batch_size, n_head, series_num, d_tensor = q.shape
         _batch_size, _n_head, _series_num, input_window, d_tensor_v = v.shape
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_tensor)
-        attn_weights = self.softmax(scores / self.tau)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_tensor) # q和k相乘，除sqrt(d_tensor)是为了让方差变成标准正态分布
+        attn_weights = self.softmax(scores / self.tau) # 通过softmax得到注意力矩阵
 
         # v_reshaped = v.view(batch_size, n_head, series_num, -1)
         v_reshaped = v.reshape(batch_size, n_head, series_num, -1)
 
-        out_reshaped = torch.matmul(attn_weights, v_reshaped)
+        out_reshaped = torch.matmul(attn_weights, v_reshaped) # 修改v矩阵
 
         # out = out_reshaped.view(batch_size, n_head, series_num, input_window, feature_dim_v)
         out = out_reshaped.reshape(batch_size, n_head, series_num, input_window, d_tensor_v) # Use reshape
@@ -385,7 +385,23 @@ class PredictModel(nn.Module):
             out = out.repeat(1, self.output_window, 1, 1)
         return out # [batch_size, output_window, series_num, output_dim]
     
-    # 得到格兰杰因果矩阵
+    # 获得所有编码器层的第一层权重
+    def get_first_layer_params(self):
+        first_layer_params = []
+        for layer in self.encoder.layers:  # 遍历所有编码层
+            for i in range(self.series_num):
+                pattern = f"attention.tcn_processors.{i}.network_layers.0.conv1.weight"
+                found = False
+                for name, param in layer.named_parameters():
+                    if name.endswith(pattern):
+                        first_layer_params.append(param)
+                        found = True
+                        break
+                if not found:
+                    first_layer_params.append(None)
+        return first_layer_params
+    
+    # 获得格兰杰因果矩阵
     def GC(self, threshold=False, ignore_kernel=True, weight_threshold=0.0):
         '''
         kernel_size在这里代表着时间延迟

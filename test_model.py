@@ -6,12 +6,12 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from visual.causalMatrix import compare_causality_csvs, visualize_single_causality_csv
+from MutiTCN.only_tcn import MultiTCNModel
+from visual.causalMatrix import visualize_single_causality_csv
 from model.Granger_causalFormer import PredictModel
 import pandas as pd
 import os
-from config import DEVICE, timeseriesDataLoader, series_num
+from config import INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, DEVICE, timeseriesDataLoader, SERIES_NUM
 # 设置 Matplotlib 中文显示
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -21,46 +21,55 @@ def load_model(model_path, device):
     # 加载参数
     saved_config = joblib.load(model_path / "model_config.pkl")
     
-    input_window = saved_config['input_window']
-    output_window = saved_config['output_window']
-    series_num = saved_config['series_num']
-    feature_dim = saved_config['feature_dim']
-    output_dim = saved_config['output_dim'] 
-
-    # transformer参数
-    d_model = saved_config['d_model']
-    n_head = saved_config['n_head']
-    n_layers = saved_config['n_layers']
-    ffn_hidden = saved_config['ffn_hidden']
+    input_window = INPUT_WINDOW
+    output_window = OUTPUT_WINDOW
+    feature_dim = FEATURE_DIM
+    output_dim = OUTPUT_DIM
+    series_num = SERIES_NUM
     dropout = saved_config['dropout'] 
-    tau = saved_config['tau']
     
-    # TCN 参数
+    # # TCN 参数
     tcn_channels = saved_config['tcn_channels'] 
-    tcn_kernel_size = saved_config['tcn_kernel_size']
-    tcn_dropout = saved_config['tcn_dropout']
+    kernel_size = saved_config['kernel_size']
+
+    # # transformer参数
+    # d_model = saved_config['d_model']
+    # n_head = saved_config['n_head']
+    # n_layers = saved_config['n_layers']
+    # ffn_hidden = saved_config['ffn_hidden']
+    # tau = saved_config['tau']
+
+    # model = PredictModel(
+    #     input_window=input_window,
+    #     output_window=output_window,
+    #     series_num=series_num,
+    #     feature_dim=feature_dim,
+    #     output_dim=output_dim,
+    #     device=device,  
+    #     d_model=d_model,
+    #     n_head=n_head,
+    #     n_layers=n_layers,
+    #     tcn_channels=tcn_channels,
+    #     tcn_kernel_size=kernel_size,
+    #     tcn_dropout=tcn_dropout,
+    #     ffn_hidden=ffn_hidden,
+    #     dropout=dropout, 
+    #     tau=tau
+    # ).to(device)
+
     
-    model = PredictModel(
+    model = MultiTCNModel(
         input_window=input_window,
         output_window=output_window,
         series_num=series_num,
         feature_dim=feature_dim,
         output_dim=output_dim,
-        device=device,  
-        d_model=d_model,
-        n_head=n_head,
-        n_layers=n_layers,
+        device=DEVICE,
         tcn_channels=tcn_channels,
-        tcn_kernel_size=tcn_kernel_size,
-        tcn_dropout=tcn_dropout,
-        ffn_hidden=ffn_hidden,
-        dropout=dropout, 
-        tau=tau
-    ).to(device)
+        kernel_size=kernel_size,
+        dropout=dropout,
+    ).to(DEVICE)
     
-    # model = PredictModel2(
-    #     config=config
-    # ).to(device)
     
     model_weight_path = model_path / "best_model.pth"
     model.load_state_dict(torch.load(model_weight_path, map_location=device))
@@ -158,8 +167,7 @@ def evaluate_model(model, test_loader, device, max_samples=200):
             
             # 获取预测结果
             predictions = model(batch_x) # predictions:[batch_size, output_window, series_num, output_dim]
-            
-            # 将预测结果和真实值变numpy格式，存储到 CPU 上
+
             results['predictions'].append(predictions.cpu().numpy()) # [max_samples, output_window, series_num, output_dim]
             results['targets'].append(batch_y.cpu().numpy())
             
@@ -290,7 +298,7 @@ def get_latest_run_id_simple():
 
 def main(model_path):
     train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler()
-    print(f"时间序列数量: {series_num}")
+    print(f"时间序列数量: {SERIES_NUM}")
     print(f"测试集数据大小: {len(test_loader.dataset)}")
 
     model = load_model(model_path, DEVICE) # 构建模型
@@ -299,11 +307,11 @@ def main(model_path):
     results = evaluate_model(model, test_loader, DEVICE, max_samples=200)
     
     # 得到格兰杰因果关系
-    save_gc_to_csv(model, series_num, model_path, threshold=False, ignore_kernel=True)
+    save_gc_to_csv(model, SERIES_NUM, model_path, threshold=False, ignore_kernel=True)
     
     # 选择前5个序列进行绘制
-    plot_indices = list(range(min(5, series_num)))
-    plot_predictions(results, series_num, plot_indices, save_path= model_path / "model_predict.png")
+    plot_indices = list(range(min(5, SERIES_NUM)))
+    plot_predictions(results, SERIES_NUM, plot_indices, save_path= model_path / "model_predict.png")
 
 
 

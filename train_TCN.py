@@ -1,4 +1,5 @@
 import os
+import sys
 import joblib
 from matplotlib import rcParams
 from datetime import datetime
@@ -6,25 +7,47 @@ import torch.nn as nn
 import torch
 from pathlib import Path
 import torch.optim as optim
-from logger.logger import get_logger, setup_logging
-from model.Granger_causalFormer import PredictModel
+import gc
+
+from MutiTCN.only_tcn import MultiTCNModel
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
+
 from model.granger_tcn import (
     lasso_penalty,
     PGD_update
 )
 import matplotlib.pyplot as plt
 from config import DATA_PATH,BATCH_SIZE, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE, timeseriesDataLoader, SERIES_NUM
-
+from logger.logger import get_logger, setup_logging
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
-class CausalFormerTrainer3:
-    def __init__(self, model, epoch, save_dir, criterion, lr, device, series_num,
-                train_loader, valid_loader, penalty_type, lasso_param, logger=None,
-                ridge_param=0.01, verbose=1):
+class MultiTCNTrainer:
+    """
+    Multi-TCN模型训练器 - 分离第一层和其他层的优化
+    
+    Args:
+        model: MultiTCNModel实例
+        epochs (int): 训练轮数
+        save_dir (str): 模型保存目录
+        criterion: 损失函数
+        lr (float): 学习率
+        first_layer_lr (float): 第一层学习率
+        device: 计算设备
+        series_num (int): 时间序列数量
+        train_loader: 训练数据加载器
+        valid_loader: 验证数据加载器
+        penalty_type (str): 正则化类型 ('GL', 'GSGL', 'H')
+        lasso_param (float): Lasso正则化参数
+        ridge_param (float): Ridge正则化参数
+        logger: 日志记录器
+        verbose (int): 详细程度
+    """
+    def __init__(self, model, epochs, save_dir, criterion, lr, device, series_num,
+                 train_loader, valid_loader, penalty_type, lasso_param, logger=None,
+                 ridge_param=0.01, verbose=1):
         self.model = model
-        self.epochs = epoch
+        self.epochs = epochs
         self.save_dir = save_dir
         self.criterion = criterion
         self.logger = logger
@@ -41,12 +64,13 @@ class CausalFormerTrainer3:
         self.verbose = verbose
 
         # 学习率调度器参数
-        self.lr_decay_step = 10
-        self.lr_decay_gamma = 0.5
+        self.lr_decay_step = 15
+        self.lr_decay_gamma = 0.7
         self.use_plateau_scheduler = False
         self.plateau_patience = 5
         self.plateau_factor = 0.5
 
+        # 训练记录
         self.train_losses = []
         self.train_mses = []
         self.train_ridges = []
@@ -64,42 +88,135 @@ class CausalFormerTrainer3:
         self.best_epoch = 0
         self.best_model_state = None
 
-        # 参数分组：分离TCN第一层参数和其他参数
+        # 分离第一层参数和其他参数
         self.first_layer_params = []
         self.other_params = []
         
-        # 收集TCN第一层参数
-        first_layer_param_ids = set()
+        # 收集第一层参数
+        first_layer_param_names = set()
         for i in range(self.series_num):
-            first_layer_conv_pattern = f"encoder.layers.0.attention.tcn_processors.{i}.network_layers.0.conv1.weight"
-            found = False
-            for name, param in model.named_parameters():
-                if name == first_layer_conv_pattern:
-                    self.first_layer_params.append(param)
-                    first_layer_param_ids.add(id(param))
-                    found = True
-                    break
-            if not found:
-                self.first_layer_params.append(None)
-                if self.verbose > 0:
-                    print(f"Warning: First layer parameter for TCN {i} not found.")
+            first_layer_conv_pattern = f"tcn_processors.{i}.network_layers.0.conv1.weight"
+            first_layer_param_names.add(first_layer_conv_pattern)
         
-        # 收集其他参数（除了TCN第一层）
-        for param in model.parameters():
-            if id(param) not in first_layer_param_ids:
+        # 分类参数
+        for name, param in self.model.named_parameters():
+            if name in first_layer_param_names:
+                self.first_layer_params.append(param)
+            else:
                 self.other_params.append(param)
 
-        # 创建Adam优化器，仅用于非第一层参数
+        # 只为非第一层参数创建Adam优化器
         self.optimizer = optim.Adam(self.other_params, lr=self.base_lr, weight_decay=0)
+
+            
+    def ridge_regularize(self):
+        """对非第一层参数进行Ridge正则化"""
+        ridge_loss = 0.0
+        for param in self.other_params:
+            if param is not None:
+                ridge_loss += torch.sum(param ** 2)
+        return self.ridge_param * ridge_loss
         
-        # 学习率调度器
-        if self.use_plateau_scheduler:
-            self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=self.plateau_factor,
-                                             patience=self.plateau_patience, verbose=self.verbose > 0)
-        else:
-            self.scheduler = StepLR(self.optimizer, step_size=self.lr_decay_step, gamma=self.lr_decay_gamma)
-    
-    def train(self, save_model=False):       
+
+    def train_epoch(self):
+        """训练一个epoch"""
+        self.model.train()
+        epoch_loss = 0.0
+        epoch_mse = 0.0
+        epoch_ridge = 0.0
+        epoch_penalty = 0.0
+        num_batches = 0
+
+        for batch_idx, (batch_x, batch_y) in enumerate(self.train_loader):
+            batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
+            
+            # 清零梯度
+            if self.optimizer is not None:
+                self.optimizer.zero_grad()
+            
+            # 手动清零第一层梯度
+            for param in self.first_layer_params:
+                if param.grad is not None:
+                    param.grad.zero_()
+
+            # 前向传播
+            predictions = self.model(batch_x)
+            mse_loss = self.criterion(predictions, batch_y)
+            
+            # 正则化计算
+            ridge_loss = self.ridge_regularize()
+            total_loss = mse_loss + ridge_loss
+            total_loss.backward()
+
+            self.optimizer.step()
+
+            # 对第一层参数执行手动梯度下降
+            for param in self.first_layer_params:
+                if param.grad is not None:
+                    param.data = param.data - self.base_lr * param.grad
+
+            # 对第一层应用近端优化（稀疏正则化）
+            nonsmooth_penalty = 0.0
+            for param in self.first_layer_params:
+                if param is not None:
+                    # 应用近端梯度下降更新
+                    PGD_update(param, self.lasso_param, self.base_lr, self.penalty_type)
+                    # 计算稀疏惩罚
+                    nonsmooth_penalty += lasso_penalty(param, self.lasso_param, self.penalty_type)
+            
+            if len(self.first_layer_params) > 0:
+                nonsmooth_penalty /= len(self.first_layer_params)
+
+            # 总损失（包含正则化）
+            total_loss_with_penalty = total_loss + nonsmooth_penalty
+
+            epoch_loss += total_loss_with_penalty.item()
+            epoch_mse += mse_loss.item()
+            epoch_ridge += ridge_loss.item()
+            epoch_penalty += nonsmooth_penalty.item()
+            num_batches += 1
+
+        return (epoch_loss / num_batches, epoch_mse / num_batches,
+                epoch_ridge / num_batches, epoch_penalty / num_batches)
+
+    def validate(self):
+        """验证一个epoch"""
+        self.model.eval()
+        val_loss = 0.0
+        val_mse = 0.0
+        val_ridge = 0.0
+        val_penalty = 0.0
+        num_batches = 0
+
+        with torch.no_grad():
+            for batch_x, batch_y in self.valid_loader:
+                batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
+                predictions = self.model(batch_x)
+                mse_loss = self.criterion(predictions, batch_y)
+                ridge_loss = self.ridge_regularize()
+                
+                # 计算稀疏惩罚
+                nonsmooth_penalty = 0.0
+                for param in self.first_layer_params:
+                    if param is not None:
+                        nonsmooth_penalty += lasso_penalty(param, self.lasso_param, self.penalty_type)
+                
+                if len(self.first_layer_params) > 0:
+                    nonsmooth_penalty /= len(self.first_layer_params)
+
+                total_loss = mse_loss + ridge_loss + nonsmooth_penalty
+
+                val_loss += total_loss.item()
+                val_mse += mse_loss.item()
+                val_ridge += ridge_loss.item()
+                val_penalty += nonsmooth_penalty.item()
+                num_batches += 1
+
+        return (val_loss / num_batches, val_mse / num_batches,
+                val_ridge / num_batches, val_penalty / num_batches)
+
+    def train(self, save_model=False):
+        """主训练循环"""
         for epoch in range(self.epochs):
             epoch_loss, epoch_mse, epoch_ridge, epoch_penalty = self.train_epoch()
             val_loss, val_mse, val_ridge, val_penalty = self.validate()
@@ -115,22 +232,17 @@ class CausalFormerTrainer3:
             self.val_ridges.append(float(val_ridge))
             self.val_penalties.append(float(val_penalty))
             
-            if self.use_plateau_scheduler:
-                self.scheduler.step(val_loss)
-            else:
-                self.scheduler.step()
-            
             if self.verbose > 0:
                 print(f"Epoch {epoch+1}/{self.epochs}")
-                print(f"Train - loss: {epoch_loss:.6f}, MSE: {epoch_mse:.6f}, "
-                    f"Ridge: {epoch_ridge:.6f}, Penalty: {epoch_penalty:.6f}")
-                print(f"Valid - loss: {val_loss:.6f}, MSE: {val_mse:.6f}, "
-                    f"Ridge: {val_ridge:.6f}, Penalty: {val_penalty:.6f}")
-                # 输出当前学习率
-                current_lr = self.optimizer.param_groups[0]['lr']
-                print(f"当前学习率: {current_lr:.2e}")
+                print(f"Train - Loss: {epoch_loss:.6f}, MSE: {epoch_mse:.6f}, "
+                      f"Ridge: {epoch_ridge:.6f}, Penalty: {epoch_penalty:.6f}")
+                print(f"Valid - Loss: {val_loss:.6f}, MSE: {val_mse:.6f}, "
+                      f"Ridge: {val_ridge:.6f}, Penalty: {val_penalty:.6f}")
+                if self.optimizer is not None:
+                    current_lr = self.optimizer.param_groups[0]['lr']
+                    print(f"Adam Learning Rate: {current_lr:.2e}")
             
-            # 早停检查：基于验证集MSE -----------------------------------------------
+            # 早停检查
             if val_mse < self.best_mse_result:
                 self.best_mse_result = val_mse
                 self.patience_counter = 0
@@ -138,145 +250,41 @@ class CausalFormerTrainer3:
                 # 保存最佳模型状态
                 self.best_model_state = {k: v.detach().clone() for k, v in self.model.state_dict().items()}
                 
-                # 如果需要，保存模型
+                # 保存模型
                 if save_model:
                     os.makedirs(self.save_dir, exist_ok=True)
-                    # 保存模型权重
-                    torch.save(self.best_model_state, self.save_dir / "best_model.pth")
-                    # 保存参数
-                    joblib.dump(self.model.config, self.save_dir / "model_config.pkl")
+                    torch.save(self.best_model_state, os.path.join(self.save_dir, "best_model.pth"))
+                    joblib.dump(self.model.config, os.path.join(self.save_dir, "model_config.pkl"))
                     
                 if self.verbose > 0:
-                    print(f"  新的最佳验证Loss: {val_loss:.6f}")
+                    print(f"  New best validation MSE: {val_mse:.6f}")
             else:
                 self.patience_counter += 1
                 if self.verbose > 0:
-                    print(f"  验证Loss未改善 ({self.patience_counter}/{self.early_stop_patience})")
+                    print(f"  No improvement ({self.patience_counter}/{self.early_stop_patience})")
                 
-                # 如果耐心用完，触发早停
+                # 早停
                 if self.patience_counter >= self.early_stop_patience:
                     if self.verbose > 0:
-                        print(f"  早停触发！验证Loss连续{self.early_stop_patience}轮未改善")
-                        print(f"  最佳epoch: {self.best_epoch+1}, 最佳验证MSE: {self.best_mse_result:.6f}")
+                        print(f"  Early stopping triggered! No improvement for {self.early_stop_patience} epochs")
+                        print(f"  Best epoch: {self.best_epoch+1}, Best validation MSE: {self.best_mse_result:.6f}")
                     self.early_stopped = True
                     # 恢复最佳模型状态
                     if self.best_model_state is not None:
                         self.model.load_state_dict(self.best_model_state)
                         if self.verbose > 0:
-                            print("  已恢复最佳模型状态")
+                            print("  Restored best model state")
                     break
         
-        # 训练结束后的信息输出 -----------------------------------------------------
+        # 训练结束信息
         if self.verbose > 0:
             if self.early_stopped:
-                print(f"\n训练因早停而结束于第{epoch+1}轮")
-                print(f"最佳验证MSE: {self.best_mse_result:.6f} (第{self.best_epoch+1}轮)")
+                print(f"\nTraining stopped early at epoch {epoch+1}")
+                print(f"Best validation MSE: {self.best_mse_result:.6f} (epoch {self.best_epoch+1})")
             else:
-                print(f"\n训练正常结束于第{epoch+1}轮")
+                print(f"\nTraining completed at epoch {epoch+1}")
         
-        return self.best_mse_result  
-    
-    def ridge_regularize(self):
-        """对非第一层参数进行Ridge正则化"""
-        ridge_loss = 0.0
-        first_layer_set = set(self.first_layer_params)
-        for param in self.model.parameters():
-            if param not in first_layer_set:
-                ridge_loss += torch.sum(param ** 2)
-        return self.ridge_param * ridge_loss
-    
-    def manual_sgd_update(self, param, lr):
-        """对TCN第一层参数进行手动梯度下降更新"""
-        if param is not None and param.grad is not None:
-            param.data = param.data - lr * param.grad
-    
-    def train_epoch(self):
-        self.model.train()
-        epoch_loss = 0.0
-        epoch_mse = 0.0
-        epoch_ridge = 0.0
-        epoch_penalty = 0.0
-        num_batches = 0
-
-        for batch_idx, (batch_x, batch_y) in enumerate(self.train_loader):
-            batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
-            
-            # 清零梯度
-            self.optimizer.zero_grad()
-            # 手动清零TCN第一层参数的梯度
-            for param in self.first_layer_params:
-                if param is not None:
-                    param.grad = None
-
-            # 前向传播
-            predictions = self.model(batch_x)
-            mse_loss = self.criterion(predictions, batch_y)
-            
-            # 正则化计算
-            ridge_loss = self.ridge_regularize()
-            total_loss = mse_loss + ridge_loss
-            total_loss.backward()
-
-            # Adam优化器更新其他参数
-            self.optimizer.step()
-
-            # 手动梯度下降更新TCN第一层参数
-            current_lr = self.optimizer.param_groups[0]['lr']  # 使用相同的学习率
-            for param in self.first_layer_params:
-                if param is not None:
-                    self.manual_sgd_update(param, current_lr)
-
-            # 对第一层应用近端优化（PGD更新）
-            nonsmooth_penalty = 0.0
-            for i in range(self.series_num):
-                if self.first_layer_params[i] is not None:
-                    PGD_update(self.first_layer_params[i], self.lasso_param, current_lr, self.penalty_type)
-                    nonsmooth_penalty += lasso_penalty(self.first_layer_params[i], self.lasso_param, self.penalty_type)
-            nonsmooth_penalty /= self.series_num
-
-            # 总损失（包含正则化）
-            total_loss_with_penalty = total_loss + nonsmooth_penalty
-
-            epoch_loss += total_loss_with_penalty.item()
-            epoch_mse += mse_loss.item()
-            epoch_ridge += ridge_loss.item()
-            epoch_penalty += nonsmooth_penalty.item()
-            num_batches += 1
-
-        return (epoch_loss / num_batches, epoch_mse / num_batches,
-                epoch_ridge / num_batches, epoch_penalty / num_batches)
-    
-    def validate(self):
-        self.model.eval()
-        val_loss = 0.0
-        val_mse = 0.0
-        val_ridge = 0.0
-        val_penalty = 0.0
-        num_batches = 0
-
-        with torch.no_grad():
-            for batch_x, batch_y in self.valid_loader:
-                batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
-                predictions = self.model(batch_x)
-                mse_loss = self.criterion(predictions, batch_y)
-                ridge_loss = self.ridge_regularize()
-                
-                nonsmooth_penalty = 0.0
-                for i in range(self.series_num):
-                    if self.first_layer_params[i] is not None:
-                        nonsmooth_penalty += lasso_penalty(self.first_layer_params[i], self.lasso_param, self.penalty_type)
-                nonsmooth_penalty /= self.series_num
-
-                total_loss = mse_loss + ridge_loss + nonsmooth_penalty
-
-                val_loss += total_loss.item()
-                val_mse += mse_loss.item()
-                val_ridge += ridge_loss.item()
-                val_penalty += nonsmooth_penalty.item()
-                num_batches += 1
-
-        return (val_loss / num_batches, val_mse / num_batches,
-                val_ridge / num_batches, val_penalty / num_batches)
+        return self.best_mse_result
     
     def cleanup(self):
         """清理资源以防止内存泄漏"""
@@ -293,7 +301,6 @@ class CausalFormerTrainer3:
         self.val_penalties = [float(x) for x in self.val_penalties]
         
         # 强制垃圾回收
-        import gc
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -362,8 +369,7 @@ class CausalFormerTrainer3:
         
         if self.verbose > 0:
             print(f"Loss curves saved to {plots_dir}")
-            
-            
+
 def main():
     run_id = datetime.now().strftime(r'%m-%d_%H-%M-%S')
     save_dir = Path('saved') / run_id
@@ -371,36 +377,22 @@ def main():
     train_logger = get_logger() # 日志记录器
 
     train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
-    
-    # CausalFormer 参数
-    d_model = 16
-    n_head = 4
-    n_layers = 1
-    ffn_hidden = 16
-    dropout = 0.2
-    tau = 10
-    tcn_channels = 16
-    tcn_kernel_size = 3
-    tcn_dropout = 0.2
 
+    dropout = 0
+    tcn_channels = 256
+    kernel_size = 4
     # 训练参数
-    criterion = nn.MSELoss()
-    lr = 1e-3
-    lasso_param =0.01
-    penalty_type = 'H'
+    criterion = nn.L1Loss()
+    lr = 0.0002 
+    lasso_param = 10
+    penalty_type = 'GL'
     
     log_message = (
     f"本次所使用的模型参数和训练参数如下：\n"
     f"模型参数:\n"
-    f"  - d_model: {d_model}\n"
-    f"  - n_head: {n_head}\n"
-    f"  - n_layers: {n_layers}\n"
     f"  - tcn_channels: {tcn_channels}\n"
-    f"  - tcn_kernel_size: {tcn_kernel_size}\n"
-    f"  - tcn_dropout: {tcn_dropout}\n"
-    f"  - ffn_hidden: {ffn_hidden}\n"
+    f"  - kernel_size: {kernel_size}\n"
     f"  - dropout: {dropout}\n"
-    f"  - tau: {tau}\n"
     f"训练参数:\n"
     f"  - EPOCHS: {EPOCHS}\n"
     f"  - BATCH_SIZE: {BATCH_SIZE}\n"
@@ -414,34 +406,36 @@ def main():
     f"  - Lasso 参数: {lasso_param}\n"
     f"  - 正则化类型: {penalty_type}\n"
     f"  - 序列数量: {SERIES_NUM}\n"
-    f"优化器配置:\n"
-    f"  - TCN第一层: 手动梯度下降 (SGD)\n"
-    f"  - 其他层: Adam优化器\n"
 )
 
     train_logger.info(log_message)
     
-    model = PredictModel(
+    model = MultiTCNModel(
         input_window=INPUT_WINDOW,
         output_window=OUTPUT_WINDOW,
         series_num=SERIES_NUM,
         feature_dim=FEATURE_DIM,
         output_dim=OUTPUT_DIM,
         device=DEVICE,
-        d_model=d_model,
-        n_head=n_head,
-        n_layers=n_layers,
         tcn_channels=tcn_channels,
-        tcn_kernel_size=tcn_kernel_size,
-        tcn_dropout=tcn_dropout,
-        ffn_hidden=ffn_hidden,
+        kernel_size=kernel_size,
         dropout=dropout,
-        tau=tau
     ).to(DEVICE)
     
-    causalFormerTrainer = CausalFormerTrainer3(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
-                                               train_loader=train_loader, valid_loader=val_loader, series_num=SERIES_NUM, logger = train_logger,
-                                               penalty_type=penalty_type, lasso_param=lasso_param)
+    causalFormerTrainer = MultiTCNTrainer(
+        model=model, 
+        epochs=EPOCHS, 
+        save_dir=save_dir, 
+        criterion=criterion,
+        lr=lr, 
+        device=DEVICE,
+        train_loader=train_loader, 
+        valid_loader=val_loader, 
+        series_num=SERIES_NUM, 
+        logger=train_logger,
+        penalty_type=penalty_type, 
+        lasso_param=lasso_param
+    )
     causalFormerTrainer.train(save_model=True)
     causalFormerTrainer.plot_training_curves()
 

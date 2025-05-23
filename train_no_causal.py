@@ -345,13 +345,13 @@ def main():
 
     train_logger.info(log_message)
 
-    model = PredictModel2(config).to(DEVICE)
+    # model = PredictModel2(config).to(DEVICE)
     
-    causalFormerTrainer = CausalFormerTrainer3(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
-                                               train_loader=train_loader, valid_loader=val_loader, series_num=series_num, logger = train_logger,
-                                                lasso_param=lasso_param)
-    causalFormerTrainer.train(save_model=True)
-    causalFormerTrainer.plot_training_curves()
+    # causalFormerTrainer = CausalFormerTrainer3(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
+    #                                            train_loader=train_loader, valid_loader=val_loader, series_num=series_num, logger = train_logger,
+    #                                             lasso_param=lasso_param)
+    # causalFormerTrainer.train(save_model=True)
+    # causalFormerTrainer.plot_training_curves()
 
 if __name__ == '__main__':
     main()

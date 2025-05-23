@@ -12,12 +12,14 @@ from matplotlib import rcParams
 import functools
 # from logger.logger import get_logger, setup_logging
 import optuna
+from MutiTCN.only_tcn import MultiTCNModel
 from logger.logger import get_logger, setup_logging
 from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader
+from train_TCN import MultiTCNTrainer
 from train_with_line import CausalFormerTrainer2
 from train_no_line import CausalFormerTrainer3
-from config import DATA_PATH, gc_dir, BATCH_SIZE, DATA_SEED, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE, timeseriesDataLoader, series_num
+from config import DATA_PATH, gc_dir, BATCH_SIZE, DATA_SEED, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE, timeseriesDataLoader, SERIES_NUM
 
 
 # 设置 Matplotlib 中文显示
@@ -33,18 +35,18 @@ train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # �
 def objective(trial, logger, save_dir):
     
     # CausalFormer 参数
-    d_model = trial.suggest_categorical('d_model', [32, 64, 128, 256])       # QK 嵌入维度
-    n_head = trial.suggest_categorical('n_head', [2, 4, 8, 16, 32])             # 注意力头数
-    n_layers = trial.suggest_int('n_layers', 1, 3)                      # Encoder 层数
-    ffn_hidden = trial.suggest_categorical('ffn_hidden', [64, 128, 256, 512])# FFN 隐藏层维度
+    # d_model = trial.suggest_categorical('d_model', [32, 64, 128, 256])       # QK 嵌入维度
+    # n_head = trial.suggest_categorical('n_head', [2, 4, 8, 16, 32])             # 注意力头数
+    # n_layers = trial.suggest_int('n_layers', 1, 3)                      # Encoder 层数
+    # ffn_hidden = trial.suggest_categorical('ffn_hidden', [64, 128, 256, 512])# FFN 隐藏层维度
+    # tau = round(trial.suggest_float('tau', 0.5, 100.0, log=True), 5)               # Softmax 温度
     dropout = round(trial.suggest_float('dropout', 0.1, 0.5), 5)                 # Dropout
-    tau = round(trial.suggest_float('tau', 0.5, 100.0, log=True), 5)               # Softmax 温度
-    lasso_param = trial.suggest_float('lasso_param', 1e-5, 1e-1, log=True)  # 正则化系数
 
     # GrangerTCN 参数
     tcn_channels = trial.suggest_categorical('tcn_channels', [16, 32, 64, 128, 256]) # TCN 通道数
-    tcn_kernel_size = trial.suggest_categorical('tcn_kernel_size', [2, 3, 4, 5]) # TCN 核大小
+    kernel_size = trial.suggest_categorical('kernel_size', [2, 3, 4, 5]) # TCN 核大小
     tcn_dropout = round(trial.suggest_float('tcn_dropout', 0.0, 0.3), 5)         # TCN Dropout
+    lasso_param = trial.suggest_float('lasso_param', 1e-3, 1, log=True)  # 正则化系数
 
     # 近端梯度下降和稀疏性参数
     loss_functions_list = {
@@ -57,52 +59,61 @@ def objective(trial, logger, save_dir):
     lr = round(trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True), 5)     # 学习率
     penalty_type = trial.suggest_categorical('penalty_type', ['GL', 'GSGL', 'H']) # 惩罚类型
 
-    print(f"\n--- Trial {trial.number} ---")
-    print(f"  CausalFormer 参数:d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
-    print(f"  GrangerTCN 参数: channels={tcn_channels}, kernel={tcn_kernel_size}, dropout={tcn_dropout:.3f}")
-    print(f"  训练参数: loss_function={loss_function_name}, lr={lr:.6f}, penalty={penalty_type}")
+    logger.info(f"\n--- Trial {trial.number} ---")
+    # logger.info(f"  CausalFormer 参数:d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
+    logger.info(f"  GrangerTCN 参数: channels={tcn_channels}, kernel={kernel_size}, dropout={tcn_dropout:.3f}")
+    logger.info(f"  训练参数: loss_function={loss_function_name}, lr={lr:.6f}, penalty={penalty_type}")
 
     # --- 模型和损失函数 ---
     # 创建配置字典传递给 PredictModel
-    data_config = {
-        'input_window': INPUT_WINDOW,
-        'output_window': OUTPUT_WINDOW,
-        'feature_dim': FEATURE_DIM,
-        'output_dim': OUTPUT_DIM,
-        'series_num': series_num,
-        'device':DEVICE
-    }
-
-    model = PredictModel(input_window=INPUT_WINDOW,
-                         output_window=OUTPUT_WINDOW,
-                         series_num=series_num,
-                         feature_dim=FEATURE_DIM,
-                         output_dim=OUTPUT_DIM,
-                         device=DEVICE,
-                         d_model=d_model,
-                         n_head=n_head,
-                         n_layers=n_layers,
-                         tcn_channels=tcn_channels,
-                         tcn_kernel_size=tcn_kernel_size,
-                         tcn_dropout=tcn_dropout,
-                         ffn_hidden=ffn_hidden,
-                         drop_prob=dropout, 
-                         tau=tau).to(DEVICE)
+    # model = PredictModel(input_window=INPUT_WINDOW,
+    #                      output_window=OUTPUT_WINDOW,
+    #                      series_num=SERIES_NUM,
+    #                      feature_dim=FEATURE_DIM,
+    #                      output_dim=OUTPUT_DIM,
+    #                      device=DEVICE,
+    #                      d_model=d_model,
+    #                      n_head=n_head,
+    #                      n_layers=n_layers,
+    #                      tcn_channels=tcn_channels,
+    #                      tcn_kernel_size=kernel_size,
+    #                      tcn_dropout=tcn_dropout,
+    #                      ffn_hidden=ffn_hidden,
+    #                      dropout=dropout, 
+    #                      tau=tau).to(DEVICE)
+    
+    model = MultiTCNModel(
+        input_window=INPUT_WINDOW,
+        output_window=OUTPUT_WINDOW,
+        series_num=SERIES_NUM,
+        feature_dim=FEATURE_DIM,
+        output_dim=OUTPUT_DIM,
+        device=DEVICE,
+        tcn_channels=tcn_channels,
+        kernel_size=kernel_size,
+        dropout=dropout,
+    ).to(DEVICE)
 
     # ---开始训练---
-    # causalFormerTrainer = CausalFormerTrainer4(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
-    #                                             series_num=series_num,
-    #                                             train_loader=train_loader, valid_loader=val_loader, penalty_type=penalty_type)
-    causalFormerTrainer = CausalFormerTrainer3(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
-                                               train_loader=train_loader, valid_loader=val_loader, series_num=series_num, lasso_param = lasso_param,
-                                               penalty_type=penalty_type)
-    # causalFormerTrainer = CausalFormerTrainer2(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
-    #                                            train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
+    # causalFormerTrainer = CausalFormerTrainer3(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
+    #                                            train_loader=train_loader, valid_loader=val_loader, series_num=SERIES_NUM, lasso_param = lasso_param,
     #                                            penalty_type=penalty_type)
-    # causalFormerTrainer = CausalFormerTrainer(model=model, epoch=EPOCHS, save_dir= save_dir, criterion=criterion,lr=lr, device=DEVICE,
-    #                                            train_loader=train_loader, valid_loader=val_loader, series_num=series_num,
-    #                                            penalty_type=penalty_type)
-    Vailed_loss= causalFormerTrainer.train()
+    
+    causalFormerTrainer = MultiTCNTrainer(
+        model=model, 
+        epochs=EPOCHS, 
+        save_dir=save_dir, 
+        criterion=criterion,
+        lr=lr, 
+        device=DEVICE,
+        train_loader=train_loader, 
+        valid_loader=val_loader, 
+        series_num=SERIES_NUM, 
+        logger=logger,
+        penalty_type=penalty_type, 
+        lasso_param=lasso_param
+    )
+    Vailed_mse= causalFormerTrainer.train()
     
     # 保存训练器的状态用于后续恢复
     trainer_losses = {
@@ -128,9 +139,9 @@ def objective(trial, logger, save_dir):
     # 保存训练器的状态用于后续恢复
     trial.set_user_attr('trainer_losses', trainer_losses)
     
-    logger.info(f"Trial {trial.number} 完成。验证集 loss: {Vailed_loss:.6f}")
+    logger.info(f"Trial {trial.number} 完成。验证集 loss: {Vailed_mse:.6f}")
 
-    return Vailed_loss
+    return Vailed_mse
 
 def begin_optuna(save_dir, logger):
     study = optuna.create_study(
@@ -162,8 +173,8 @@ def begin_optuna(save_dir, logger):
     for key, value in best_params.items():
         logger.info(f"    {key}: {value}")
          # 保存最佳参数和模型
-        joblib.dump(best_params, save_dir / "best_params.pkl")
-        torch.save(best_trial.user_attr['best_model_state'], save_dir / "best_model.pth")
+        joblib.dump(best_params, save_dir / "model_config.pkl")
+        torch.save(best_trial.user_attrs['best_model_state'], save_dir / "best_model.pth")
     return completed_trials, best_trial, best_params
 
 # ---  可视化optuna优化过程 ---
