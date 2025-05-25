@@ -9,8 +9,9 @@ from pathlib import Path
 import torch.optim as optim
 import gc
 
-from MutiTCN.only_tcn import MultiTCNModel
+from model.TCN_cMLP import cMLP
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
+
 import matplotlib.pyplot as plt
 from config import DATA_PATH,BATCH_SIZE, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE, timeseriesDataLoader, SERIES_NUM
 from logger.logger import get_logger, setup_logging
@@ -56,8 +57,7 @@ def lasso_penalty(network, lam, penalty):
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
-
-class MultiTCNTrainer:
+class TCN_cMLP_Trainer:
     def __init__(self, model, epochs, save_dir, criterion, lr, device, series_num,
                  train_loader, valid_loader, penalty_type, lasso_param, ridge_param, 
                  logger=None, verbose=1):
@@ -103,35 +103,34 @@ class MultiTCNTrainer:
         self.best_epoch = 0
         self.best_model_state = None
 
-        # 分离第一层参数和其他参数
+        # 分离MLP第一层参数和其他参数
         self.first_layer_params = []
         self.other_params = []
         
-        # 收集第一层参数
+        # 获取MLP第一层参数
+        first_layer_params = self.model.get_first_layer_params()
+        self.first_layer_params = first_layer_params
+        
+        # 收集MLP第一层参数的名称
         first_layer_param_names = set()
         for i in range(self.series_num):
-            first_layer_conv_pattern = f"tcn_processors.{i}.network_layers.0.conv1.weight"
-            first_layer_param_names.add(first_layer_conv_pattern)
+            first_layer_param_names.add(f"cmlp.networks.{i}.layers.0.weight")
         
-        # 分类参数
+        # 分类参数：将MLP第一层参数和其他参数分开
         for name, param in self.model.named_parameters():
             if name in first_layer_param_names:
-                self.first_layer_params.append(param)
+                continue
             else:
                 self.other_params.append(param)
 
-        # 只为非第一层参数创建Adam优化器
         self.optimizer = optim.Adam(self.other_params, lr=self.base_lr, weight_decay=0)
 
-            
     def ridge_regularize(self):
-        """对非第一层参数进行Ridge正则化"""
         ridge_loss = 0.0
         for param in self.other_params:
             if param is not None:
                 ridge_loss += torch.sum(param ** 2)
         return self.ridge_param * ridge_loss
-        
 
     def train_epoch(self):
         """训练一个epoch"""
@@ -149,7 +148,7 @@ class MultiTCNTrainer:
             if self.optimizer is not None:
                 self.optimizer.zero_grad()
             
-            # 手动清零第一层梯度
+            # 手动清零MLP第一层梯度
             for param in self.first_layer_params:
                 if param.grad is not None:
                     param.grad.zero_()
@@ -163,14 +162,15 @@ class MultiTCNTrainer:
             total_loss = mse_loss + ridge_loss
             total_loss.backward()
 
+            # 对非MLP第一层参数执行Adam优化
             self.optimizer.step()
 
-            # 对第一层参数执行手动梯度下降
+            # 对MLP第一层参数执行手动梯度下降
             for param in self.first_layer_params:
                 if param.grad is not None:
                     param.data = param.data - self.base_lr * param.grad
 
-            # 对第一层应用近端优化（稀疏正则化）
+            # 对MLP第一层应用近端优化（稀疏正则化）
             nonsmooth_penalty = 0.0
             for param in self.first_layer_params:
                 if param is not None:
@@ -253,6 +253,8 @@ class MultiTCNTrainer:
                       f"Ridge: {epoch_ridge:.6f}, Penalty: {epoch_penalty:.6f}")
                 print(f"Valid - Loss: {val_loss:.6f}, MSE: {val_mse:.6f}, "
                       f"Ridge: {val_ridge:.6f}, Penalty: {val_penalty:.6f}")
+                print('Variable usage = %.2f%%'
+                      % (100 * torch.mean(self.model.GC().float())))
                 if self.optimizer is not None:
                     current_lr = self.optimizer.param_groups[0]['lr']
                     print(f"Adam Learning Rate: {current_lr:.2e}")
@@ -395,14 +397,16 @@ def main():
 
     dropout = 0
     tcn_channels = 256
-    kernel_size = 4
-    aggregation_method = 'last'
+    kernel_size = 5
     # 训练参数
     criterion = nn.MSELoss(reduction='mean')
-    lr = 0.0002
-    lasso_param = 10
-    ridge_param = 0.001
-    penalty_type = 'GL'
+    lr = 0.05
+    lasso_param = 0.002
+    ridge_param = 0.01
+    penalty_type = 'H'
+    
+    mlp_hidden = [100]
+    mlp_activation = 'prelu'
     
     log_message = (
     f"本次所使用的模型参数和训练参数如下：\n"
@@ -410,36 +414,46 @@ def main():
     f"  - tcn_channels: {tcn_channels}\n"
     f"  - kernel_size: {kernel_size}\n"
     f"  - dropout: {dropout}\n"
+    f"  - ridge_param: {ridge_param}\n"
+    f"  - mlp_hidden: {mlp_hidden}\n"
+    f"  - mlp_activation: {mlp_activation}\n"
     f"训练参数:\n"
     f"  - EPOCHS: {EPOCHS}\n"
     f"  - BATCH_SIZE: {BATCH_SIZE}\n"
     f"  - DEVICE: {DEVICE}\n"
     f"  - 数据路径: {DATA_PATH}\n"
     f"  - 输入窗口长度: {INPUT_WINDOW}\n"
-    f"  - 输出窗口长度: {OUTPUT_WINDOW}\n"
-    f"  - 特征维度: {FEATURE_DIM}\n"
-    f"  - 输出维度: {OUTPUT_DIM}\n"
     f"  - 学习率: {lr}\n"
     f"  - Lasso 参数: {lasso_param}\n"
     f"  - 正则化类型: {penalty_type}\n"
     f"  - 序列数量: {SERIES_NUM}\n"
+   
 )
 
     train_logger.info(log_message)
     
-    model = MultiTCNModel(
-        input_window=INPUT_WINDOW,
-        output_window=OUTPUT_WINDOW,
+    model = cMLP(
         series_num=SERIES_NUM,
-        feature_dim=FEATURE_DIM,
-        output_dim=OUTPUT_DIM,
-        device=DEVICE,
-        tcn_channels=tcn_channels,
         kernel_size=kernel_size,
-        dropout=dropout
+        mlp_hidden= mlp_hidden,
+        mlp_activation= mlp_activation
     ).to(DEVICE)
     
-    causalFormerTrainer = MultiTCNTrainer(
+    # model = TCN_cMLP_Model(
+    #     input_window=INPUT_WINDOW,
+    #     output_window=OUTPUT_WINDOW,
+    #     series_num=SERIES_NUM,
+    #     feature_dim=FEATURE_DIM,
+    #     output_dim=OUTPUT_DIM,
+    #     device=DEVICE,
+    #     tcn_channels=tcn_channels,
+    #     kernel_size=kernel_size,
+    #     mlp_hidden= mlp_hidden,
+    #     mlp_activation= mlp_activation,
+    #     dropout=dropout,
+    # ).to(DEVICE)
+    
+    causalFormerTrainer = TCN_cMLP_Trainer(
         model=model, 
         epochs=EPOCHS, 
         save_dir=save_dir, 

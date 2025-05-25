@@ -44,9 +44,10 @@ def objective(trial, logger, save_dir):
 
     # GrangerTCN 参数
     tcn_channels = trial.suggest_categorical('tcn_channels', [16, 32, 64, 128, 256]) # TCN 通道数
-    kernel_size = trial.suggest_categorical('kernel_size', [2, 3, 4, 5]) # TCN 核大小
+    kernel_size = trial.suggest_categorical('kernel_size', [3, 4, 5]) # TCN 核大小
     tcn_dropout = round(trial.suggest_float('tcn_dropout', 0.0, 0.3), 5)         # TCN Dropout
     lasso_param = trial.suggest_float('lasso_param', 1e-3, 1, log=True)  # 正则化系数
+    ridge_param = trial.suggest_float('ridge_param', 1e-4, 0.01, log=True)
 
     # 近端梯度下降和稀疏性参数
     loss_functions_list = {
@@ -61,8 +62,8 @@ def objective(trial, logger, save_dir):
 
     logger.info(f"\n--- Trial {trial.number} ---")
     # logger.info(f"  CausalFormer 参数:d_model={d_model}, n_head={n_head}, n_layers={n_layers}, ffn_hidden={ffn_hidden}, dropout={dropout:.3f}, tau={tau:.3f}")
-    logger.info(f"  GrangerTCN 参数: channels={tcn_channels}, kernel={kernel_size}, dropout={tcn_dropout:.3f}")
-    logger.info(f"  训练参数: loss_function={loss_function_name}, lr={lr:.6f}, penalty={penalty_type}")
+    logger.info(f"  GrangerTCN 参数: channels={tcn_channels}, kernel_size={kernel_size}, dropout={tcn_dropout:.3f}")
+    logger.info(f"  训练参数: loss_function={loss_function_name}, lr={lr:.6f}, penalty={penalty_type}, lasso_param={lasso_param}, ridge_param={ridge_param:.3f}")
 
     # --- 模型和损失函数 ---
     # 创建配置字典传递给 PredictModel
@@ -111,7 +112,8 @@ def objective(trial, logger, save_dir):
         series_num=SERIES_NUM, 
         logger=logger,
         penalty_type=penalty_type, 
-        lasso_param=lasso_param
+        lasso_param=lasso_param,
+        ridge_param=ridge_param
     )
     Vailed_mse= causalFormerTrainer.train()
     

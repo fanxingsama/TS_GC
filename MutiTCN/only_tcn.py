@@ -47,7 +47,7 @@ class MultiTCNModel(nn.Module):
         self.tcn_processors = nn.ModuleList()
         for i in range(self.series_num):
             self.tcn_processors.append(
-                GrangerTCN(input_series_num=self.series_num - 1,  # 排除目标序列自身
+                GrangerTCN(input_series_num=self.series_num,
                           output_size=tcn_channels,
                           TCN_hidden_channels=tcn_channels,
                           kernel_size=kernel_size,
@@ -98,17 +98,15 @@ class MultiTCNModel(nn.Module):
         # 为每个时间序列运行对应的TCN
         all_tcn_outputs = []
         for i in range(self.series_num):
-            # 创建掩码，排除目标序列
-            mask = torch.ones(self.series_num, dtype=torch.bool, device=self.device)
-            mask[i] = False
-            other_series = x_tcn_input[:, mask, :]  # [batch_size, series_num-1, input_window]
+            # mask = torch.ones(self.series_num, dtype=torch.bool, device=self.device)
+            # mask[i] = False
+            # other_series = x_tcn_input[:, mask, :]  # [batch_size, series_num-1, input_window]
             
             # 通过TCN处理
-            tcn_out = self.tcn_processors[i](other_series)  # [batch_size, tcn_channels, input_window]
+            tcn_out = self.tcn_processors[i](x_tcn_input)  # [batch_size, tcn_channels, input_window]
             all_tcn_outputs.append(tcn_out)
-        
-        # 堆叠所有TCN输出
-        stacked_outputs = torch.stack(all_tcn_outputs, dim=1)  # [batch_size, series_num, tcn_channels, input_window]
+
+        stacked_outputs = torch.stack(all_tcn_outputs, dim=1)  # 堆叠成为第一维张量，[batch_size, series_num, tcn_channels, input_window]
         
         # 取最后一个时间步的特征用于预测
         last_step_features = stacked_outputs[:, :, :, -1]  # [batch_size, series_num, tcn_channels]
@@ -156,10 +154,7 @@ class MultiTCNModel(nn.Module):
             # weights.shape: [output_channels, input_series_num-1, kernel_size]
             
             current_tcn_channel_idx = 0
-            for j in range(self.series_num):  # 源序列
-                if i == j:  # 跳过自身
-                    continue
-                    
+            for j in range(self.series_num):  # 源序列                  
                 if current_tcn_channel_idx < weights.shape[1]:
                     if ignore_kernel:
                         # 计算所有卷积核位置的L2范数

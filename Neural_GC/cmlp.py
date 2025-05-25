@@ -6,30 +6,23 @@ from models.model_helper import activation_helper
 
 # 一个MLP模型，用于单个时间序列的预测。
 class MLP(nn.Module):
-    '''
-    num_series：时间序列的数量，表示每个时间序列的数据个数。
-    lag：滞后值，表示每个时间序列的前 lag 个时间步的数据将被用于预测当前时间步的值。
-    hidden：隐藏层神经元个数，是一个列表，表示每个隐藏层的神经元个数。
-    activation：激活函数。
-    '''
     def __init__(self, num_series, lag, hidden, activation):
         super(MLP, self).__init__()
         self.activation = activation_helper(activation)
-
-        # Set up network.
-        layer = nn.Conv1d(num_series, hidden[0], lag) # 使用卷积来构建模型的第一层，输入维度为num_series，输出维度为hidden[0]
-        # 如果输入数据的形状是 (batch_size, num_series, T)，经过第一层后，输出的形状将是 (batch_size, hidden[0], T - lag + 1)。
+        # 使用卷积来构建模型的第一层，输入维度为num_series，输出维度为hidden[0]，卷积核大小是滞后值
+        layer = nn.Conv1d(num_series, hidden[0], lag) 
+        # 输入数据的形状(batch_size, num_series, T)，经过第一层后，输出的形状 (batch_size, hidden[0], T - lag + 1)。
         modules = [layer]
-
-        for d_in, d_out in zip(hidden, hidden[1:] + [1]):
-            layer = nn.Conv1d(d_in, d_out, 1)
+        # 后续隐藏层
+        for d_in, d_out in zip(hidden, hidden[1:] + [1]): # 遍历隐藏层的输入和输出维度
+            layer = nn.Conv1d(d_in, d_out, 1) 
             modules.append(layer)
 
-        # Register parameters.
+        # 把这些层注册到模型中
         self.layers = nn.ModuleList(modules)
 
     def forward(self, X):
-        X = X.transpose(2, 1)
+        X = X.transpose(2, 1) # 变成[batch_size, series_num, series_length]
         for i, fc in enumerate(self.layers):
             if i != 0: # 如果当前层不是第一层
                 X = self.activation(X) # 使用激活函数进行激活
@@ -41,15 +34,6 @@ class MLP(nn.Module):
 # 一个组件化多层感知机模型，为每个时间序列分别训练一个MLP。
 class cMLP(nn.Module):
     def __init__(self, num_series, lag, hidden, activation='relu'):
-        '''
-        cMLP model with one MLP per time series.
-
-        Args:
-          num_series: 时间序列的数量
-          lag: 模型预测当前时间点，会考虑过去的多少个时间点
-          hidden: 每层隐藏单元的数量。
-          activation: 非线性激活函数
-        '''
         super(cMLP, self).__init__()
         self.p = num_series
         self.lag = lag
@@ -65,6 +49,7 @@ class cMLP(nn.Module):
         Args:
           X: torch tensor of shape (batch, T, p).
         '''
+        # 在指定维度拼接张量
         return torch.cat([network(X) for network in self.networks], dim=2)
 
     def GC(self, threshold=True, ignore_lag=True):
@@ -190,6 +175,72 @@ def regularize(network, lam, penalty):
 def ridge_regularize(network, lam):
     '''Apply ridge penalty at all subsequent layers.'''
     return lam * sum([torch.sum(fc.weight ** 2) for fc in network.layers[1:]])
+
+# 使用 ISTA算法训练模型。
+def train_model_ista(cmlp, X, lr, max_iter, lam=0, lam_ridge=0, penalty='H',
+                     lookback=5, check_every=100, verbose=1):
+    lag = cmlp.lag
+    p = X.shape[-1]
+    loss_fn = nn.MSELoss(reduction='mean')
+    train_loss_list = []
+
+    # 早停机制
+    best_it = None
+    best_loss = np.inf
+    best_model = None
+
+    # 使用i:i+1而不使用i是为了保持三维的形状，让输出维度和目标相匹配，使用i就是二维了
+    loss = sum([loss_fn(cmlp.networks[i](X[:, :-1]), X[:, lag:, i:i+1])
+                for i in range(p)])
+    ridge = sum([ridge_regularize(net, lam_ridge) for net in cmlp.networks])
+    smooth = loss + ridge
+
+    for it in range(max_iter): 
+        smooth.backward() # 反向传播
+        for param in cmlp.parameters(): # 手动更新参数
+            param.data = param - lr * param.grad
+
+        # 对第一层进行近端优化
+        if lam > 0:
+            for net in cmlp.networks:
+                prox_update(net, lam, lr, penalty)
+
+        cmlp.zero_grad() # 梯度归零
+
+        # 得到优化后模型的损失
+        loss = sum([loss_fn(cmlp.networks[i](X[:, :-1]), X[:, lag:, i:i+1])
+                    for i in range(p)])
+        ridge = sum([ridge_regularize(net, lam_ridge) for net in cmlp.networks])
+        smooth = loss + ridge
+
+        # Check progress.
+        if (it + 1) % check_every == 0:
+            # 增加非平滑损失（第一层的Lass值）
+            nonsmooth = sum([regularize(net, lam, penalty)
+                             for net in cmlp.networks])
+            mean_loss = (smooth + nonsmooth) / p
+            train_loss_list.append(mean_loss.detach())
+
+            if verbose > 0:
+                print(('-' * 10 + 'Iter = %d' + '-' * 10) % (it + 1))
+                print('Loss = %f' % mean_loss)
+                print('Variable usage = %.2f%%'
+                      % (100 * torch.mean(cmlp.GC().float())))
+
+            # 检查是否早停
+            if mean_loss < best_loss:
+                best_loss = mean_loss
+                best_it = it
+                best_model = deepcopy(cmlp)
+            elif (it - best_it) == lookback * check_every:
+                if verbose:
+                    print('Stopping early')
+                break
+
+    # Restore best model.
+    restore_parameters(cmlp, best_model)
+
+    return train_loss_list
 
 
 # 将参数值从best_model移动到model
@@ -450,73 +501,6 @@ def train_model_adam(cmlp, X, lr, max_iter, lam=0, lam_ridge=0, penalty='H',
     restore_parameters(cmlp, best_model)
 
     return train_loss_list
-
-
-# 使用 ISTA算法训练模型。
-def train_model_ista(cmlp, X, lr, max_iter, lam=0, lam_ridge=0, penalty='H',
-                     lookback=5, check_every=100, verbose=1):
-    lag = cmlp.lag
-    p = X.shape[-1]
-    loss_fn = nn.MSELoss(reduction='mean')
-    train_loss_list = []
-
-    # 早停机制
-    best_it = None
-    best_loss = np.inf
-    best_model = None
-
-    loss = sum([loss_fn(cmlp.networks[i](X[:, :-1]), X[:, lag:, i:i+1])
-                for i in range(p)])
-    ridge = sum([ridge_regularize(net, lam_ridge) for net in cmlp.networks])
-    smooth = loss + ridge
-
-    for it in range(max_iter): 
-        smooth.backward() # 反向传播
-        for param in cmlp.parameters(): # 手动更新参数
-            param.data = param - lr * param.grad
-
-        # 对第一层进行近端优化
-        if lam > 0:
-            for net in cmlp.networks:
-                prox_update(net, lam, lr, penalty)
-
-        cmlp.zero_grad() # 梯度归零
-
-        # 得到优化后模型的损失
-        loss = sum([loss_fn(cmlp.networks[i](X[:, :-1]), X[:, lag:, i:i+1])
-                    for i in range(p)])
-        ridge = sum([ridge_regularize(net, lam_ridge) for net in cmlp.networks])
-        smooth = loss + ridge
-
-        # Check progress.
-        if (it + 1) % check_every == 0:
-            # 增加非平滑损失（第一层的Lass值）
-            nonsmooth = sum([regularize(net, lam, penalty)
-                             for net in cmlp.networks])
-            mean_loss = (smooth + nonsmooth) / p
-            train_loss_list.append(mean_loss.detach())
-
-            if verbose > 0:
-                print(('-' * 10 + 'Iter = %d' + '-' * 10) % (it + 1))
-                print('Loss = %f' % mean_loss)
-                print('Variable usage = %.2f%%'
-                      % (100 * torch.mean(cmlp.GC().float())))
-
-            # 检查是否早停
-            if mean_loss < best_loss:
-                best_loss = mean_loss
-                best_it = it
-                best_model = deepcopy(cmlp)
-            elif (it - best_it) == lookback * check_every:
-                if verbose:
-                    print('Stopping early')
-                break
-
-    # Restore best model.
-    restore_parameters(cmlp, best_model)
-
-    return train_loss_list
-
 
 # 无正则化的训练过程。
 def train_unregularized(cmlp, X, lr, max_iter, lookback=5, check_every=100,

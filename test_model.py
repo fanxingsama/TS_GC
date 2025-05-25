@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from MutiTCN.only_tcn import MultiTCNModel
+from model.TCN_cMLP import TCN_cMLP_Model
 from visual.causalMatrix import visualize_single_causality_csv
 from model.Granger_causalFormer import PredictModel
 import pandas as pd
@@ -31,32 +32,6 @@ def load_model(model_path, device):
     # # TCN 参数
     tcn_channels = saved_config['tcn_channels'] 
     kernel_size = saved_config['kernel_size']
-
-    # # transformer参数
-    # d_model = saved_config['d_model']
-    # n_head = saved_config['n_head']
-    # n_layers = saved_config['n_layers']
-    # ffn_hidden = saved_config['ffn_hidden']
-    # tau = saved_config['tau']
-
-    # model = PredictModel(
-    #     input_window=input_window,
-    #     output_window=output_window,
-    #     series_num=series_num,
-    #     feature_dim=feature_dim,
-    #     output_dim=output_dim,
-    #     device=device,  
-    #     d_model=d_model,
-    #     n_head=n_head,
-    #     n_layers=n_layers,
-    #     tcn_channels=tcn_channels,
-    #     tcn_kernel_size=kernel_size,
-    #     tcn_dropout=tcn_dropout,
-    #     ffn_hidden=ffn_hidden,
-    #     dropout=dropout, 
-    #     tau=tau
-    # ).to(device)
-
     
     model = MultiTCNModel(
         input_window=input_window,
@@ -67,8 +42,28 @@ def load_model(model_path, device):
         device=DEVICE,
         tcn_channels=tcn_channels,
         kernel_size=kernel_size,
-        dropout=dropout,
+        dropout=dropout
     ).to(DEVICE)
+    
+    # MLP 参数
+    # mlp_hidden = saved_config['mlp_hidden'] 
+    # mlp_activation = saved_config['mlp_activation']
+    # tcn_channels = saved_config['tcn_channels'] 
+    # kernel_size = saved_config['kernel_size']
+    
+    # model = TCN_cMLP_Model(
+    #     input_window=input_window,
+    #     output_window=output_window,
+    #     series_num=series_num,
+    #     feature_dim=feature_dim,
+    #     output_dim=output_dim,
+    #     device=DEVICE,
+    #     tcn_channels=tcn_channels,
+    #     kernel_size=kernel_size,
+    #     mlp_hidden= mlp_hidden,
+    #     mlp_activation= mlp_activation,
+    #     dropout=dropout,
+    # ).to(DEVICE)
     
     
     model_weight_path = model_path / "best_model.pth"
@@ -183,7 +178,7 @@ def evaluate_model(model, test_loader, device, max_samples=200):
     return results
 
 # 保存模型的格兰杰因果关系矩阵到 CSV 文件
-def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True):
+def save_gc_to_csv(model, series_num, path, threshold=True, ignore_kernel=True):
     """
     Args:
         path (str): CSV 文件的保存路径
@@ -199,15 +194,14 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
         cause_effect_pairs = [] 
         for effect_idx in range(series_num): # 果
             for cause_idx in range(series_num): # 因
-                if effect_idx != cause_idx:  # 可选：排除自因果
-                    strength = gc_matrix[effect_idx, cause_idx].item() # 因果关系强度
-                    # 如果需要阈值化结果，只保存非零项
-                    if not threshold or (threshold and strength > 0):
-                        cause_effect_pairs.append({
-                            'source': f'{cause_idx}',
-                            'target': f'{effect_idx}',
-                            'Strength': round(strength, 2)
-                        })
+                strength = gc_matrix[effect_idx, cause_idx].item() # 因果关系强度
+                # 如果需要阈值化结果，只保存非零项
+                if not threshold or (threshold and strength > 0):
+                    cause_effect_pairs.append({
+                        'source': f'{cause_idx}',
+                        'target': f'{effect_idx}',
+                        'Strength': round(strength, 2)
+                    })
         df = pd.DataFrame(cause_effect_pairs)
         # 按照 'Cause' 排序，如果 'Cause' 相同，则按照 'Effect' 排序
         if not df.empty:
@@ -217,17 +211,16 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
         cause_effect_pairs = []
         for effect_idx in range(series_num):
             for cause_idx in range(series_num):
-                if effect_idx != cause_idx:  # 可选：排除自因果
-                    for lag in range(gc_matrix.shape[2]):
-                        strength = gc_matrix[effect_idx, cause_idx, lag].item()
-                        # 如果需要阈值化结果，只保存非零项
-                        if not threshold or (threshold and strength > 0):
-                            cause_effect_pairs.append({
-                                'Cause': f'Series_{cause_idx}',
-                                'Effect': f'Series_{effect_idx}',
-                                'lag': lag,
-                                'Strength': round(strength, 2)
-                            })
+                for lag in range(gc_matrix.shape[2]):
+                    strength = gc_matrix[effect_idx, cause_idx, lag].item()
+                    # 如果需要阈值化结果，只保存非零项
+                    if not threshold or (threshold and strength > 0):
+                        cause_effect_pairs.append({
+                            'Cause': f'Series_{cause_idx}',
+                            'Effect': f'Series_{effect_idx}',
+                            'lag': lag,
+                            'Strength': round(strength, 2)
+                        })
         df = pd.DataFrame(cause_effect_pairs)
         # 按照 'Cause' 排序，然后 'Effect'，最后 'lag'
         if not df.empty:
@@ -237,7 +230,7 @@ def save_gc_to_csv(model, series_num, path, threshold=False, ignore_kernel=True)
     visualize_single_causality_csv(csv_path, matrix_png_save_path, show=False)
 
 # 绘制预测结果和真实值的时序序列对比图
-def plot_predictions(results, series_num, plot_indices, save_path):
+def plot_predictions(results, plot_indices, save_path):
     """
     Args:
         results: 包含预测结果和真实值的字典
@@ -245,10 +238,6 @@ def plot_predictions(results, series_num, plot_indices, save_path):
         plot_indices: 要绘制的时间序列索引列表，默认为前5个序列
         save_path: 保存图表的路径
     """
-    if plot_indices is None:
-        # 默认绘制前5个时间序列或全部（如果少于5个）
-        plot_indices = list(range(min(5, series_num)))
-    
     # 获取样本数
     n_samples = results['predictions'].shape[0]
     time_steps = np.arange(n_samples)
@@ -304,14 +293,14 @@ def main(model_path):
     model = load_model(model_path, DEVICE) # 构建模型
     
     # 评估模型
-    results = evaluate_model(model, test_loader, DEVICE, max_samples=200)
+    results = evaluate_model(model, test_loader, DEVICE, max_samples=300)
     
     # 得到格兰杰因果关系
     save_gc_to_csv(model, SERIES_NUM, model_path, threshold=False, ignore_kernel=True)
     
     # 选择前5个序列进行绘制
-    plot_indices = list(range(min(5, SERIES_NUM)))
-    plot_predictions(results, SERIES_NUM, plot_indices, save_path= model_path / "model_predict.png")
+    plot_indices = list(range(min(10, SERIES_NUM)))
+    plot_predictions(results, plot_indices, save_path= model_path / "model_predict.png")
 
 
 

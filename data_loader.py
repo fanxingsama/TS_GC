@@ -85,17 +85,8 @@ class TimeSeriesDataloader():
         # 返回训练集和验证集的采样器
         return train_loader, val_loader, test_loader
     
+    # 将归一化的数据转换回原始尺度
     def inverse_transform(self, data, series_indices=None):
-        """
-        将归一化的数据转换回原始尺度
-        
-        参数:
-        - data: 形状为 [batch_size, sequence_len, series_num, 1] 的数据
-        - series_indices: 指定要转换的时间序列索引列表，默认转换所有序列
-        
-        返回:
-        - 逆变换后的数据
-        """
         if series_indices is None:
             series_indices = range(self.series_num)
             

@@ -34,62 +34,28 @@ class TemporalBlock(nn.Module):
             dropout (float): Dropout 比率。
         """
         super(TemporalBlock, self).__init__()
-        # 第一个卷积层
+        # w形状：[out_ch, in_ch, kernel_size]
+        # n_outputs也代表了用多少个卷积核进行处理，得到多少维矩阵
         self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation) # w形状：[out_ch, in_ch, kernel_size]，相当于一个卷积核同时对in_ch条序列进行卷积
+                               stride=stride, padding=padding, dilation=dilation) 
         self.chomp1 = Chomp1d(padding)
         self.relu1 = nn.PReLU()
-        self.dropout1 = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)  
 
-        # 第二个卷积层
         self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
                                stride=stride, padding=padding, dilation=dilation)
         self.chomp2 = Chomp1d(padding)
         self.relu2 = nn.PReLU()
         self.dropout2 = nn.Dropout(dropout)
-
-        # 包含两个卷积层的序列网络
         self.net = nn.Sequential(
             self.conv1, self.chomp1, self.relu1, self.dropout1,
             self.conv2, self.chomp2, self.relu2, self.dropout2
         )
 
-        # 如果输入输出通道数不同，使用 1x1 卷积调整残差连接
+        # 使用 1x1 卷积调整残差连接
         self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.relu = nn.PReLU()
-        # 初始化权重（可选，但通常是好的实践）
         self.init_weights() 
-
-    # 稀疏初始化
-    # def init_weights(self):
-    #     # 对第一个卷积层进行稀疏初始化
-    #     weight = self.conv1.weight
-    #     weight = weight.view(weight.shape[0], -1)  # 展平为二维
-    #     nn.init.sparse_(weight, sparsity=0.9, std=0.01)
-    #     weight = weight.view_as(self.conv1.weight)  # 重塑回原来的形状
-    #     self.conv1.weight.data = weight
-    #     if self.conv1.bias is not None:
-    #         nn.init.constant_(self.conv1.bias, 0)
-
-    #     # 对第二个卷积层进行稀疏初始化
-    #     weight = self.conv2.weight
-    #     weight = weight.view(weight.shape[0], -1)
-    #     nn.init.sparse_(weight, sparsity=0.9, std=0.01)
-    #     weight = weight.view_as(self.conv2.weight)
-    #     self.conv2.weight.data = weight
-    #     if self.conv2.bias is not None:
-    #         nn.init.constant_(self.conv2.bias, 0)
-
-    #     # 如果有下采样层，同样进行稀疏初始化
-    #     if self.downsample is not None:
-    #         weight = self.downsample.weight
-    #         weight = weight.view(weight.shape[0], -1)
-    #         nn.init.sparse_(weight, sparsity=0.9, std=0.01)
-    #         weight = weight.view_as(self.downsample.weight)
-    #         self.downsample.weight.data = weight
-    #         if self.downsample.bias is not None:
-    #             nn.init.constant_(self.downsample.bias, 0)
-    
     # He初始化
     def init_weights(self):
         nn.init.kaiming_normal_(self.conv1.weight, mode='fan_in', nonlinearity='leaky_relu')
@@ -115,35 +81,30 @@ class TemporalBlock(nn.Module):
 
 class GrangerTCN(nn.Module):
     def __init__(self, input_series_num, output_size, TCN_hidden_channels, kernel_size, dropout):
-        """
-        Args:
-            input_size (int): 输入的时序序列的数量，代表除了目标时间序列外的其他序列数量 (n-1)。
-            output_size (int): 输出通道数，对应最终的输出维度。
-            TCN_hidden_channels (int or list): 每个 TemporalBlock 的输出通道数，如果有超过2个卷积块，就应该是个list，[tcn_channels, tcn_channels, ...]，表示每一层卷积块的输出维度和下一层的输入维度。
-            若 TCN_hidden_channels 设计为递增（如 [32, 64, 128]），深层块能捕捉更复杂的模式，但需通过跳跃连接中的 1x1 卷积对齐输入输出维度。这会增加参数量和计算成本，但可能提升模型表达能力。
-            
-            kernel_size (int): 卷积核大小。
-            dropout (float): Dropout 比率。
-        """
         super(GrangerTCN, self).__init__()
         self.network_layers = nn.ModuleList()
         
         # 第一个 TemporalBlock
-        dilation_size = 1  # 第一个block的膨胀系数为1
+        dilation_size = 1 
         padding = (kernel_size - 1) * dilation_size
         self.network_layers.append(
-            TemporalBlock(input_series_num, TCN_hidden_channels, kernel_size, stride=1,
+            TemporalBlock(input_series_num, 
+                          TCN_hidden_channels, 
+                          kernel_size, 
+                          stride=1,
                           dilation=dilation_size,
                           padding=padding,
                           dropout=dropout)
         )
         
         # 第二个 TemporalBlock
-        dilation_size = 2  # 第二个block的膨胀系数为2
+        dilation_size = 2 
         padding = (kernel_size - 1) * dilation_size
         self.network_layers.append(
-            # 通过隐藏通道数个特征，提取到output_size个特征
-            TemporalBlock(TCN_hidden_channels, output_size, kernel_size, stride=1,
+            TemporalBlock(TCN_hidden_channels, 
+                          output_size, 
+                          kernel_size, 
+                          stride=1,
                           dilation=dilation_size,
                           padding=padding,
                           dropout=dropout)
@@ -152,46 +113,10 @@ class GrangerTCN(nn.Module):
         return self.network_layers[0].conv1.weight
 
     def forward(self, x):
-        # x：[batch_size, series_num, sequence_length]
+        # x：[batch_size, series_num, input_window]
         for layer in self.network_layers:
             x = layer(x)
-        return x  # [batch_size, output_feature, sequence_length]
+        # 输出为每个时刻该序列的output_size个特征的数据
+        return x # [batch_size, series_num, input_window]
     
-    
-# 对神经网络的第一层权重矩阵进行近端更新，作用于函数，直接对函数的参数进行稀疏性约束，使得某些参数被设置为零，从而实现稀疏性。
-def PGD_update(network, lam, lr, penalty):
-    hidden, p, lag = network.shape
-    if penalty == 'GL': # 组Loss惩罚
-        norm = torch.norm(network, dim=(0, 2), keepdim=True)
-        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
-                  * torch.clamp(norm - (lr * lam), min=0.0))
-    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
-        norm = torch.norm(network, dim=0, keepdim=True)
-        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
-                  * torch.clamp(norm - (lr * lam), min=0.0))
-        norm = torch.norm(network, dim=(0, 2), keepdim=True)
-        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
-                  * torch.clamp(norm - (lr * lam), min=0.0))
-    elif penalty == 'H': # 层次Lasso惩罚
-        for i in range(lag):
-            norm = torch.norm(network[:, :, :(i + 1)], dim=(0, 2), keepdim=True)
-            network.data[:, :, :(i+1)] = (
-                (network.data[:, :, :(i+1)] / torch.clamp(norm, min=(lr * lam)))
-                * torch.clamp(norm - (lr * lam), min=0.0))
-    else:
-        raise ValueError('unsupported penalty: %s' % penalty)
-
-# 稀疏惩罚的结果
-def lasso_penalty(network, lam, penalty):
-    hidden, p, lag = network.shape
-    if penalty == 'GL': # 组Loss惩罚
-        return lam * torch.sum(torch.norm(network, dim=(0, 2)))
-    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
-        return lam * (torch.sum(torch.norm(network, dim=(0, 2)))
-                      + torch.sum(torch.norm(network, dim=0)))
-    elif penalty == 'H': # 层次Lasso惩罚
-        return lam * sum([torch.sum(torch.norm(network[:, :, :(i+1)], dim=(0, 2)))
-                          for i in range(lag)])
-    else:
-        raise ValueError('unsupported penalty: %s' % penalty)
 
