@@ -137,6 +137,7 @@ class TCN_cMLP_Model(nn.Module):
             kernel_size=kernel_size,
             dropout=dropout
         )
+        self.feature_fusion = nn.Linear(series_num * input_window, series_num)
         
         # 时间维度池化层
         self.temporal_pooling = nn.AdaptiveAvgPool1d(1) 
@@ -177,6 +178,7 @@ class TCN_cMLP_Model(nn.Module):
         
         # 时间维度池化，得到每个序列的代表性特征
         pooled_features = self.temporal_pooling(tcn_features).squeeze(-1)  # [batch_size, series_num]
+        # fused_features = self.feature_fusion(tcn_features.flatten(1))
         
         # MLP预测 - 输入特征直接对应原始序列
         mlp_outputs = self.cmlp(pooled_features)  # [batch_size, series_num, 1]

@@ -6,8 +6,8 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-from MutiTCN.only_tcn import MultiTCNModel
-from model.TCN_cMLP import TCN_cMLP_Model
+from MutiTCN.MultiTCN import MultiTCN
+from model.TS_GC import MutiTS_GC
 from visual.causalMatrix import visualize_single_causality_csv
 from model.Granger_causalFormer import PredictModel
 import pandas as pd
@@ -22,47 +22,38 @@ def load_model(model_path, device):
     # 加载参数
     saved_config = joblib.load(model_path / "model_config.pkl")
     
-    input_window = INPUT_WINDOW
-    output_window = OUTPUT_WINDOW
-    feature_dim = FEATURE_DIM
-    output_dim = OUTPUT_DIM
-    series_num = SERIES_NUM
+    input_window = saved_config['input_window']
+    output_window = saved_config['output_window']
+    series_num = saved_config['series_num']
     dropout = saved_config['dropout'] 
     
     # # TCN 参数
     # tcn_channels = saved_config['tcn_channels'] 
     # kernel_size = saved_config['kernel_size']
     
-    # model = MultiTCNModel(
+    # model = MultiTCN(
     #     input_window=input_window,
     #     output_window=output_window,
     #     series_num=series_num,
-    #     feature_dim=feature_dim,
-    #     output_dim=output_dim,
     #     device=DEVICE,
     #     tcn_channels=tcn_channels,
     #     kernel_size=kernel_size,
     #     dropout=dropout
     # ).to(DEVICE)
     
-    # MLP 参数
-    mlp_hidden = saved_config['mlp_hidden'] 
-    mlp_activation = saved_config['mlp_activation']
-    tcn_channels = saved_config['tcn_channels'] 
+    feature_dim = saved_config['feature_dim'] 
     kernel_size = saved_config['kernel_size']
+    temporal_layers = saved_config['temporal_layers']
     
-    model = TCN_cMLP_Model(
+    model = MutiTS_GC(
         input_window=input_window,
         output_window=output_window,
         series_num=series_num,
         feature_dim=feature_dim,
-        output_dim=output_dim,
-        device=DEVICE,
-        tcn_channels=tcn_channels,
+        temporal_layers=temporal_layers,
         kernel_size=kernel_size,
-        mlp_hidden= mlp_hidden,
-        mlp_activation= mlp_activation,
         dropout=dropout,
+        device=DEVICE
     ).to(DEVICE)
     
     
@@ -250,8 +241,8 @@ def plot_predictions(results, plot_indices, save_path):
         plt.subplot(len(plot_indices), 1, i + 1)
         
         # 提取当前序列的预测和真实值（使用原始尺度的数据）
-        pred_series = results['predictions'][:, 0, idx, 0]  # [samples, output_window=1, series_idx, output_dim=1]
-        target_series = results['targets'][:, 0, idx, 0]
+        pred_series = results['predictions'][:, 0, idx]  # [samples, output_window=1, series_idx, output_dim=1]
+        target_series = results['targets'][:, 0, idx]
         
         # 绘制曲线
         plt.plot(time_steps, target_series, 'b-', label='真实值', linewidth=2)

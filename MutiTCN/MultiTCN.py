@@ -6,29 +6,13 @@ import math
 sys.path.append("../")
 from model.granger_tcn import GrangerTCN
 
-class MultiTCNModel(nn.Module):
-    """
-    基于多个TCN的预测模型
-    
-    Args:
-        input_window (int): 输入窗口长度
-        output_window (int): 输出窗口长度  
-        series_num (int): 时间序列数量
-        feature_dim (int): 输入特征维度
-        output_dim (int): 输出维度
-        tcn_channels (int): TCN隐藏通道数
-        kernel_size (int): 卷积核大小
-        dropout (float): Dropout率
-        device: 计算设备
-    """
-    def __init__(self, input_window, output_window, series_num, feature_dim, output_dim, 
+class MultiTCN(nn.Module):
+    def __init__(self, input_window, output_window, series_num,
                  tcn_channels, kernel_size, dropout, device):
-        super(MultiTCNModel, self).__init__()
+        super(MultiTCN, self).__init__()
         self.input_window = input_window
         self.output_window = output_window
         self.series_num = series_num
-        self.feature_dim = feature_dim
-        self.output_dim = output_dim
         self.device = device
         
         # 配置信息
@@ -36,8 +20,6 @@ class MultiTCNModel(nn.Module):
             'input_window': self.input_window,
             'output_window': self.output_window,
             'series_num': self.series_num,
-            'feature_dim': self.feature_dim,
-            'output_dim': self.output_dim,
             'tcn_channels': tcn_channels,
             'kernel_size': kernel_size,
             'dropout': dropout
@@ -56,14 +38,13 @@ class MultiTCNModel(nn.Module):
         
         # 特征融合层
         self.feature_fusion = nn.Linear(tcn_channels, tcn_channels)
-        self.pooling = nn.AdaptiveMaxPool1d(1) 
         
         # 预测头
         self.prediction_head = nn.Sequential(
             nn.Linear(tcn_channels, tcn_channels // 2),
             nn.PReLU(),
             nn.Dropout(dropout),
-            nn.Linear(tcn_channels // 2, output_dim)
+            nn.Linear(tcn_channels // 2, 1) # 输出维度固定为1
         )
         
         self.init_weights()
@@ -82,18 +63,11 @@ class MultiTCNModel(nn.Module):
     def forward(self, x):
         """
         Args:
-            x: [batch_size, input_window, series_num, feature_dim]
+            x: [batch_size, input_window, series_num]
         Returns:
-            output: [batch_size, output_window, series_num, output_dim]
+            output: [batch_size, output_window, series_num]
         """
-        
-        # 如果特征维度大于1，只取第一个特征；如果为1，则去掉最后一个维度
-        if self.feature_dim == 1:
-            x_tcn_input = x.squeeze(-1)  # [batch_size, input_window, series_num]
-        else:
-            x_tcn_input = x[..., 0]  # [batch_size, input_window, series_num]
-        
-        x_tcn_input = x_tcn_input.permute(0, 2, 1)  # [batch_size, series_num, input_window]
+        x_tcn_input = x.permute(0, 2, 1)  # [batch_size, series_num, input_window]
         
         # 为每个时间序列运行对应的TCN
         all_tcn_outputs = []
@@ -110,19 +84,18 @@ class MultiTCNModel(nn.Module):
         
         # 取最后一个时间步的特征用于预测
         last_step_features = stacked_outputs[:, :, :, -1]  # [batch_size, series_num, tcn_channels]
-        # last_step_features = self.pooling(stacked_outputs).squeeze(-1)
         
         # 特征融合
         fused_features = self.feature_fusion(last_step_features)  # [batch_size, series_num, tcn_channels]
         fused_features = F.relu(fused_features)
         
         # 预测
-        predictions = self.prediction_head(fused_features)  # [batch_size, series_num, output_dim]
+        predictions = self.prediction_head(fused_features)  # [batch_size, series_num, 1]
         
         # 调整输出形状以匹配期望的输出格式
-        predictions = predictions.unsqueeze(1)  # [batch_size, 1, series_num, output_dim]
+        predictions = predictions.permute(0, 2, 1)  # [batch_size, 1, series_num]
         
-        return predictions  # [batch_size, output_window, series_num, output_dim]
+        return predictions  # [batch_size, output_window=1, series_num]
     
     def GC(self, threshold=False, ignore_kernel=True, weight_threshold=0.0):
         """
@@ -167,3 +140,10 @@ class MultiTCNModel(nn.Module):
             return (gc_matrix > weight_threshold).int()
         else:
             return gc_matrix
+        
+    def get_first_layer_weights(self):
+        """
+        获取所有TCN的第一层卷积权重
+        返回一个字典，键为序列索引，值为对应的卷积权重
+        """
+        return [net.get_first_block_conv1_weights() for net in self.tcn_processors]

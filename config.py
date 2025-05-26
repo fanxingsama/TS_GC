@@ -10,7 +10,7 @@ gc_dir = 'data\simu_data\granger_causality.csv'
 # 训练参数
 BATCH_SIZE = 128
 DATA_SEED = 42
-INPUT_WINDOW = 5
+INPUT_WINDOW = 10
 OUTPUT_WINDOW = 1
 FEATURE_DIM = 1
 OUTPUT_DIM = 1

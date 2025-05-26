@@ -385,14 +385,12 @@ def main():
     dropout = 0
     tcn_channels =128
     kernel_size = 3
-    # 训练参数
-    criterion = nn.MSELoss()
     lr = 0.001
     lasso_param = 0.001
     ridge_param = 0.01
-    penalty_type = 'GL'
+    penalty_type = 'H'
     
-    mlp_hidden = [10]
+    mlp_hidden = [64]
     mlp_activation = 'prelu'
     
     log_message = (
@@ -437,7 +435,7 @@ def main():
         model=model, 
         epochs=EPOCHS, 
         save_dir=save_dir, 
-        criterion=criterion,
+        criterion=LOSS_FUNCTION,
         lr=lr, 
         device=DEVICE,
         train_loader=train_loader, 
