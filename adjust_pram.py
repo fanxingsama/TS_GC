@@ -12,7 +12,7 @@ from matplotlib import rcParams
 import functools
 # from logger.logger import get_logger, setup_logging
 import optuna
-from MutiTCN.MultiTCN import MultiTCNModel
+from model.MultiTCN import MultiTCNModel
 from logger.logger import get_logger, setup_logging
 from model.Granger_causalFormer import PredictModel
 from data_loader import TimeSeriesDataloader

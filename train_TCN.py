@@ -9,8 +9,7 @@ from pathlib import Path
 import torch.optim as optim
 import gc
 
-from MutiTCN.MultiTCN import MultiTCN
-from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
+from model.MultiTCN import MultiTCN
 import matplotlib.pyplot as plt
 from config import *
 from logger.logger import get_logger, setup_logging
@@ -75,7 +74,7 @@ class MultiTCNTrainer:
         self.lasso_param = lasso_param
         self.ridge_param = ridge_param
         self.series_num = series_num
-        self.early_stop_patience = 4
+        self.early_stop_patience = 10
         self.best_mse_result = float('inf')
         self.verbose = verbose
 
@@ -118,13 +117,11 @@ class MultiTCNTrainer:
 
             
     def ridge_regularize(self):
-        """对非第一层参数进行Ridge正则化"""
         ridge_loss = 0.0
         for param in self.other_params:
             if param is not None:
                 ridge_loss += torch.sum(param ** 2)
         return self.ridge_param * ridge_loss
-        
 
     def train_epoch(self):
         """训练一个epoch"""
@@ -405,7 +402,7 @@ def main():
     # ).to(DEVICE)
     
     lr = 0.0002
-    lasso_param = 0.001
+    lasso_param = 1
     ridge_param = 0.001
     penalty_type = 'H'
     
@@ -451,7 +448,7 @@ def main():
     f"  - dropout: {dropout}\n"
     f"训练参数:\n"
     f"  - BATCH_SIZE: {BATCH_SIZE}\n"
-    f"  - 损失函数: {LOSS_FUNCTION}"
+    f"  - 损失函数: {LOSS_FUNCTION}\n"
     f"  - 数据路径: {DATA_PATH}\n"
     f"  - 学习率: {lr}\n"
     f"  - Lasso 参数: {lasso_param}\n"

@@ -6,7 +6,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-from MutiTCN.MultiTCN import MultiTCN
+from model.MultiTCN import MultiTCN
 from model.TS_GC import MutiTS_GC
 from visual.causalMatrix import visualize_single_causality_csv
 from model.Granger_causalFormer import PredictModel
