@@ -12,7 +12,7 @@ import gc
 from MutiTCN.only_tcn import MultiTCNModel
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 import matplotlib.pyplot as plt
-from config import DATA_PATH,BATCH_SIZE, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE, timeseriesDataLoader, SERIES_NUM
+from config import *
 from logger.logger import get_logger, setup_logging
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -393,12 +393,7 @@ def main():
 
     train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
 
-    dropout = 0
-    tcn_channels = 256
-    kernel_size = 4
-    aggregation_method = 'last'
     # 训练参数
-    criterion = nn.MSELoss(reduction='mean')
     lr = 0.0002
     lasso_param = 10
     ridge_param = 0.001
@@ -407,18 +402,13 @@ def main():
     log_message = (
     f"本次所使用的模型参数和训练参数如下：\n"
     f"模型参数:\n"
-    f"  - tcn_channels: {tcn_channels}\n"
-    f"  - kernel_size: {kernel_size}\n"
-    f"  - dropout: {dropout}\n"
+    f"  - tcn_channels: {TCN_CHANNELS}\n"
+    f"  - kernel_size: {KERNEL_SIZE}\n"
+    f"  - dropout: {DROUP_OUT}\n"
     f"训练参数:\n"
-    f"  - EPOCHS: {EPOCHS}\n"
     f"  - BATCH_SIZE: {BATCH_SIZE}\n"
-    f"  - DEVICE: {DEVICE}\n"
+    f"  - 损失函数: {LOSS_FUNCTION}"
     f"  - 数据路径: {DATA_PATH}\n"
-    f"  - 输入窗口长度: {INPUT_WINDOW}\n"
-    f"  - 输出窗口长度: {OUTPUT_WINDOW}\n"
-    f"  - 特征维度: {FEATURE_DIM}\n"
-    f"  - 输出维度: {OUTPUT_DIM}\n"
     f"  - 学习率: {lr}\n"
     f"  - Lasso 参数: {lasso_param}\n"
     f"  - 正则化类型: {penalty_type}\n"
@@ -434,16 +424,16 @@ def main():
         feature_dim=FEATURE_DIM,
         output_dim=OUTPUT_DIM,
         device=DEVICE,
-        tcn_channels=tcn_channels,
-        kernel_size=kernel_size,
-        dropout=dropout
+        tcn_channels=TCN_CHANNELS,
+        kernel_size=KERNEL_SIZE,
+        dropout=DROUP_OUT
     ).to(DEVICE)
     
     causalFormerTrainer = MultiTCNTrainer(
         model=model, 
         epochs=EPOCHS, 
         save_dir=save_dir, 
-        criterion=criterion,
+        criterion = LOSS_FUNCTION,
         lr=lr, 
         device=DEVICE,
         train_loader=train_loader, 

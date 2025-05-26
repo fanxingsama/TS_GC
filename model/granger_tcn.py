@@ -71,13 +71,13 @@ class TemporalBlock(nn.Module):
                 nn.init.constant_(self.downsample.bias, 0)
 
     def forward(self, x):
-        out = self.net(x) # x: [batch_size, series_num, sequence_length]
+        out = self.net(x) # x: [batch_size, series_num, inpout_window]
         '''
         输入通道数和输出通道数相同时，直接使用输入张量 x 作为残差连接。
         输入通道数和输出通道数不同时，通过 1x1 卷积层对输入张量进行通道调整，以确保残差连接的输出张量的通道数与卷积层的输出通道数一致。
         '''
         res = x if self.downsample is None else self.downsample(x)
-        return self.relu(out + res) # [batch_size, n_outputs, sequence_length]
+        return self.relu(out + res) # [batch_size, n_outputs, inpout_window]
 
 class GrangerTCN(nn.Module):
     def __init__(self, input_series_num, output_size, TCN_hidden_channels, kernel_size, dropout):

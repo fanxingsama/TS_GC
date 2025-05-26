@@ -4,7 +4,16 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # 从单个CSV文件绘制因果矩阵图
-def visualize_single_causality_csv(csv_path, png_path=False, show=True):
+def visualize_single_causality_csv(csv_path, png_path=False, show=True, strength_threshold=0.0):
+    """
+    可视化单个因果关系CSV文件
+    
+    参数:
+    csv_path: CSV文件路径
+    png_path: 保存PNG图片的路径，False表示不保存
+    show: 是否显示图片
+    strength_threshold: 强度阈值，低于此值的关系将被忽略（默认0.0，即只忽略完全为0的值）
+    """
     try:
         df = pd.read_csv(csv_path)
         # 确保CSV文件包含所需的列
@@ -21,6 +30,19 @@ def visualize_single_causality_csv(csv_path, png_path=False, show=True):
             strength_column = df.columns[2]
     except Exception as e:
         print(f"读取CSV文件出错: {e}")
+        return
+    
+    # 如果有强度列，过滤掉强度为0或低于阈值的行
+    if has_strength:
+        original_count = len(df)
+        df = df[abs(df[strength_column]) > strength_threshold]
+        filtered_count = len(df)
+        if original_count != filtered_count:
+            print(f"过滤掉了 {original_count - filtered_count} 个强度为0或低于阈值({strength_threshold})的因果关系")
+    
+    # 如果过滤后没有数据，提前返回
+    if len(df) == 0:
+        print("过滤后没有有效的因果关系数据")
         return
     
     # 获取所有唯一的节点
@@ -77,7 +99,7 @@ def visualize_single_causality_csv(csv_path, png_path=False, show=True):
             for j in range(n):
                 if causality_matrix[i, j] > 0:
                     # 在深蓝色背景上使用白色文字
-                    plt.text(j, i, f"{strength_matrix[i, j]:.2f}", 
+                    plt.text(j, i, f"{strength_matrix[i, j]:.3f}", 
                              ha="center", va="center", color="white", fontweight='bold')
     
     plt.tight_layout()
@@ -92,7 +114,17 @@ def visualize_single_causality_csv(csv_path, png_path=False, show=True):
         return causality_matrix, all_nodes
 
 # 比较两个因果关系CSV文件，并标出不一致的地方
-def compare_causality_csvs(true_csv_path, estimated_csv_path, png_path=False, show=True):
+def compare_causality_csvs(true_csv_path, estimated_csv_path, png_path=False, show=True, strength_threshold=0.0):
+    """
+    比较两个因果关系CSV文件
+    
+    参数:
+    true_csv_path: 真实因果关系CSV文件路径
+    estimated_csv_path: 估计因果关系CSV文件路径
+    png_path: 保存PNG图片的路径，False表示不保存
+    show: 是否显示图片
+    strength_threshold: 强度阈值，低于此值的关系将被忽略（默认0.0，即只忽略完全为0的值）
+    """
     try:
         true_df = pd.read_csv(true_csv_path)
         estimated_df = pd.read_csv(estimated_csv_path)
@@ -122,6 +154,21 @@ def compare_causality_csvs(true_csv_path, estimated_csv_path, png_path=False, sh
     except Exception as e:
         print(f"读取CSV文件出错: {e}")
         return
+    
+    # 过滤掉强度为0或低于阈值的行
+    if has_strength_true:
+        original_count = len(true_df)
+        true_df = true_df[abs(true_df[strength_column_true]) > strength_threshold]
+        filtered_count = len(true_df)
+        if original_count != filtered_count:
+            print(f"在真实数据中过滤掉了 {original_count - filtered_count} 个强度为0或低于阈值({strength_threshold})的因果关系")
+    
+    if has_strength_est:
+        original_count = len(estimated_df)
+        estimated_df = estimated_df[abs(estimated_df[strength_column_est]) > strength_threshold]
+        filtered_count = len(estimated_df)
+        if original_count != filtered_count:
+            print(f"在估计数据中过滤掉了 {original_count - filtered_count} 个强度为0或低于阈值({strength_threshold})的因果关系")
     
     # 获取所有唯一的节点（两个文件合并）
     all_nodes = sorted(list(set(true_df['source'].unique()) | 
@@ -199,11 +246,11 @@ def compare_causality_csvs(true_csv_path, estimated_csv_path, png_path=False, sh
             
             # 如果有强度信息，在相应单元格中添加强度值
             if has_strength_true and true_matrix[i, j] > 0:
-                axarr[0].text(j, i, f"{true_strength_matrix[i, j]:.2f}", 
+                axarr[0].text(j, i, f"{true_strength_matrix[i, j]:.3f}", 
                              ha="center", va="center", color="white", fontweight='bold')
                 
             if has_strength_est and estimated_matrix[i, j] > 0:
-                axarr[1].text(j, i, f"{est_strength_matrix[i, j]:.2f}", 
+                axarr[1].text(j, i, f"{est_strength_matrix[i, j]:.3f}", 
                              ha="center", va="center", color="white", fontweight='bold')
     
     plt.tight_layout()
@@ -219,3 +266,15 @@ def compare_causality_csvs(true_csv_path, estimated_csv_path, png_path=False, sh
         result.append(est_strength_matrix)
     
     return tuple(result)
+
+# 使用示例
+if __name__ == "__main__":
+    # 单个文件可视化示例
+    # visualize_single_causality_csv('causality_data.csv', strength_threshold=0.0)
+    
+    # 比较两个文件示例
+    # compare_causality_csvs('true_causality.csv', 'estimated_causality.csv', strength_threshold=0.0)
+    
+    # 如果想要更严格的阈值，比如只显示强度大于0.1的关系：
+    # visualize_single_causality_csv('causality_data.csv', strength_threshold=0.1)
+    pass

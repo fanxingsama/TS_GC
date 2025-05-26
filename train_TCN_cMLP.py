@@ -9,11 +9,11 @@ from pathlib import Path
 import torch.optim as optim
 import gc
 
-from model.TCN_cMLP import cMLP
+from model.TCN_cMLP import TCN_cMLP_Model, cMLP
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 
 import matplotlib.pyplot as plt
-from config import DATA_PATH,BATCH_SIZE, INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, EPOCHS, DEVICE, timeseriesDataLoader, SERIES_NUM
+from config import *
 from logger.logger import get_logger, setup_logging
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -74,16 +74,8 @@ class TCN_cMLP_Trainer:
         self.lasso_param = lasso_param
         self.ridge_param = ridge_param
         self.series_num = series_num
-        self.early_stop_patience = 4
         self.best_mse_result = float('inf')
         self.verbose = verbose
-
-        # 学习率调度器参数
-        self.lr_decay_step = 15
-        self.lr_decay_gamma = 0.7
-        self.use_plateau_scheduler = False
-        self.plateau_patience = 5
-        self.plateau_factor = 0.5
 
         # 训练记录
         self.train_losses = []
@@ -97,7 +89,7 @@ class TCN_cMLP_Trainer:
         self.val_penalties = []
 
         # 早停相关变量
-        self.best_val_loss = float('inf')
+        self.early_stop_patience = 5
         self.patience_counter = 0
         self.early_stopped = False
         self.best_epoch = 0
@@ -116,7 +108,6 @@ class TCN_cMLP_Trainer:
         for i in range(self.series_num):
             first_layer_param_names.add(f"cmlp.networks.{i}.layers.0.weight")
         
-        # 分类参数：将MLP第一层参数和其他参数分开
         for name, param in self.model.named_parameters():
             if name in first_layer_param_names:
                 continue
@@ -133,7 +124,6 @@ class TCN_cMLP_Trainer:
         return self.ridge_param * ridge_loss
 
     def train_epoch(self):
-        """训练一个epoch"""
         self.model.train()
         epoch_loss = 0.0
         epoch_mse = 0.0
@@ -255,9 +245,6 @@ class TCN_cMLP_Trainer:
                       f"Ridge: {val_ridge:.6f}, Penalty: {val_penalty:.6f}")
                 print('Variable usage = %.2f%%'
                       % (100 * torch.mean(self.model.GC().float())))
-                if self.optimizer is not None:
-                    current_lr = self.optimizer.param_groups[0]['lr']
-                    print(f"Adam Learning Rate: {current_lr:.2e}")
             
             # 早停检查
             if val_mse < self.best_mse_result:
@@ -396,16 +383,16 @@ def main():
     train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
 
     dropout = 0
-    tcn_channels = 256
-    kernel_size = 5
+    tcn_channels =128
+    kernel_size = 3
     # 训练参数
-    criterion = nn.MSELoss(reduction='mean')
-    lr = 0.05
-    lasso_param = 0.002
+    criterion = nn.MSELoss()
+    lr = 0.001
+    lasso_param = 0.001
     ridge_param = 0.01
-    penalty_type = 'H'
+    penalty_type = 'GL'
     
-    mlp_hidden = [100]
+    mlp_hidden = [10]
     mlp_activation = 'prelu'
     
     log_message = (
@@ -431,27 +418,20 @@ def main():
 )
 
     train_logger.info(log_message)
-    
-    model = cMLP(
+        
+    model = TCN_cMLP_Model(
+        input_window=INPUT_WINDOW,
+        output_window=OUTPUT_WINDOW,
         series_num=SERIES_NUM,
+        feature_dim=FEATURE_DIM,
+        output_dim=OUTPUT_DIM,
+        device=DEVICE,
+        tcn_channels=tcn_channels,
         kernel_size=kernel_size,
         mlp_hidden= mlp_hidden,
-        mlp_activation= mlp_activation
+        mlp_activation= mlp_activation,
+        dropout=dropout,
     ).to(DEVICE)
-    
-    # model = TCN_cMLP_Model(
-    #     input_window=INPUT_WINDOW,
-    #     output_window=OUTPUT_WINDOW,
-    #     series_num=SERIES_NUM,
-    #     feature_dim=FEATURE_DIM,
-    #     output_dim=OUTPUT_DIM,
-    #     device=DEVICE,
-    #     tcn_channels=tcn_channels,
-    #     kernel_size=kernel_size,
-    #     mlp_hidden= mlp_hidden,
-    #     mlp_activation= mlp_activation,
-    #     dropout=dropout,
-    # ).to(DEVICE)
     
     causalFormerTrainer = TCN_cMLP_Trainer(
         model=model, 

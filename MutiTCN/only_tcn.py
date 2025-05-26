@@ -56,6 +56,7 @@ class MultiTCNModel(nn.Module):
         
         # 特征融合层
         self.feature_fusion = nn.Linear(tcn_channels, tcn_channels)
+        self.pooling = nn.AdaptiveMaxPool1d(1) 
         
         # 预测头
         self.prediction_head = nn.Sequential(
@@ -68,7 +69,6 @@ class MultiTCNModel(nn.Module):
         self.init_weights()
     
     def init_weights(self):
-        """初始化权重"""
         nn.init.kaiming_normal_(self.feature_fusion.weight, mode='fan_in', nonlinearity='leaky_relu')
         if self.feature_fusion.bias is not None:
             nn.init.constant_(self.feature_fusion.bias, 0)
@@ -110,6 +110,7 @@ class MultiTCNModel(nn.Module):
         
         # 取最后一个时间步的特征用于预测
         last_step_features = stacked_outputs[:, :, :, -1]  # [batch_size, series_num, tcn_channels]
+        # last_step_features = self.pooling(stacked_outputs).squeeze(-1)
         
         # 特征融合
         fused_features = self.feature_fusion(last_step_features)  # [batch_size, series_num, tcn_channels]
@@ -120,10 +121,6 @@ class MultiTCNModel(nn.Module):
         
         # 调整输出形状以匹配期望的输出格式
         predictions = predictions.unsqueeze(1)  # [batch_size, 1, series_num, output_dim]
-        
-        # 如果需要多步预测，重复输出
-        if self.output_window > 1:
-            predictions = predictions.repeat(1, self.output_window, 1, 1)
         
         return predictions  # [batch_size, output_window, series_num, output_dim]
     

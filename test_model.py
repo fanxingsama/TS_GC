@@ -30,28 +30,10 @@ def load_model(model_path, device):
     dropout = saved_config['dropout'] 
     
     # # TCN 参数
-    tcn_channels = saved_config['tcn_channels'] 
-    kernel_size = saved_config['kernel_size']
-    
-    model = MultiTCNModel(
-        input_window=input_window,
-        output_window=output_window,
-        series_num=series_num,
-        feature_dim=feature_dim,
-        output_dim=output_dim,
-        device=DEVICE,
-        tcn_channels=tcn_channels,
-        kernel_size=kernel_size,
-        dropout=dropout
-    ).to(DEVICE)
-    
-    # MLP 参数
-    # mlp_hidden = saved_config['mlp_hidden'] 
-    # mlp_activation = saved_config['mlp_activation']
     # tcn_channels = saved_config['tcn_channels'] 
     # kernel_size = saved_config['kernel_size']
     
-    # model = TCN_cMLP_Model(
+    # model = MultiTCNModel(
     #     input_window=input_window,
     #     output_window=output_window,
     #     series_num=series_num,
@@ -60,10 +42,28 @@ def load_model(model_path, device):
     #     device=DEVICE,
     #     tcn_channels=tcn_channels,
     #     kernel_size=kernel_size,
-    #     mlp_hidden= mlp_hidden,
-    #     mlp_activation= mlp_activation,
-    #     dropout=dropout,
+    #     dropout=dropout
     # ).to(DEVICE)
+    
+    # MLP 参数
+    mlp_hidden = saved_config['mlp_hidden'] 
+    mlp_activation = saved_config['mlp_activation']
+    tcn_channels = saved_config['tcn_channels'] 
+    kernel_size = saved_config['kernel_size']
+    
+    model = TCN_cMLP_Model(
+        input_window=input_window,
+        output_window=output_window,
+        series_num=series_num,
+        feature_dim=feature_dim,
+        output_dim=output_dim,
+        device=DEVICE,
+        tcn_channels=tcn_channels,
+        kernel_size=kernel_size,
+        mlp_hidden= mlp_hidden,
+        mlp_activation= mlp_activation,
+        dropout=dropout,
+    ).to(DEVICE)
     
     
     model_weight_path = model_path / "best_model.pth"
