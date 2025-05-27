@@ -12,7 +12,7 @@ from visual.causalMatrix import visualize_single_causality_csv
 from model.Granger_causalFormer import PredictModel
 import pandas as pd
 import os
-from config import INPUT_WINDOW, OUTPUT_WINDOW, FEATURE_DIM, OUTPUT_DIM, DEVICE, timeseriesDataLoader, SERIES_NUM
+from config import *
 # 设置 Matplotlib 中文显示
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -42,6 +42,7 @@ def load_model(model_path, device):
     # ).to(DEVICE)
     
     feature_dim = saved_config['feature_dim'] 
+    other_feature = saved_config['other_feature']  # 是否使用其他特征
     kernel_size = saved_config['kernel_size']
     temporal_layers = saved_config['temporal_layers']
     
@@ -50,90 +51,16 @@ def load_model(model_path, device):
         output_window=output_window,
         series_num=series_num,
         feature_dim=feature_dim,
+        other_feature=other_feature,
         temporal_layers=temporal_layers,
         kernel_size=kernel_size,
-        dropout=dropout,
-        device=DEVICE
+        dropout=dropout
     ).to(DEVICE)
     
     
     model_weight_path = model_path / "best_model.pth"
     model.load_state_dict(torch.load(model_weight_path, map_location=device))
     return model
-
-# 采用真阳和假阳评估指标
-def evaluate(logger, gtfile, validatedcauses, columns):
-    extendedgtdelays, readgt, extendedreadgt = getextendeddelays(gtfile, columns)
-    FP=0
-    FPdirect=0
-    TPdirect=0
-    TP=0
-    FN=0
-    FPs = []
-    FPsdirect = []
-    TPsdirect = []
-    TPs = []
-    FNs = []
-    for key in readgt:
-        for v in validatedcauses[key]:
-            if v not in extendedreadgt[key]:
-                FP+=1
-                FPs.append((key,v))
-            else:
-                TP+=1
-                TPs.append((key,v))
-            if v not in readgt[key]:
-                FPdirect+=1
-                FPsdirect.append((key,v))
-            else:
-                TPdirect+=1
-                TPsdirect.append((key,v))
-        for v in readgt[key]:
-            if v not in validatedcauses[key]:
-                FN+=1
-                FNs.append((key, v))
-    
-    def serialization(data):
-        return [f"{e[1]}->{e[0]}" for e in data]
-    logger.info(f"假阳性': {FP}")
-    logger.info(f"真阳性': {TP}")
-    logger.info(f"假阴性: {FN}")
-    logger.info(f"直接误报总数: {FPdirect}")
-    logger.info(f"直接真阳性总数: {TPdirect}")
-    logger.info(f"真阳性序列': {serialization(TPs)}")
-    logger.info(f"假阳性序列': {serialization(FPs)}")
-    logger.info(f"直接真阳性序列: {serialization(TPsdirect)}")
-    logger.info(f"直接假阳性序列: {serialization(FPsdirect)}")
-    logger.info(f"FNs: {serialization(FNs)}")
-    precision = recall = 0.
-
-    logger.info('(包括直接和间接的因果关系)')
-    if float(TP+FP)>0:
-        precision = TP / float(TP+FP)
-    logger.info(f"Precision': {precision}")
-    if float(TP + FN)>0:
-        recall = TP / float(TP + FN)
-    logger.info(f"Recall': {recall}")
-    if (precision + recall) > 0:
-        F1 = 2 * (precision * recall) / (precision + recall)
-    else:
-        F1 = 0.
-    logger.info(f"F1' score: {F1}")
-
-    logger.info('(只包括直接的因果关系)')
-    precision = recall = 0.
-    if float(TPdirect+FPdirect)>0:
-        precision = TPdirect / float(TPdirect+FPdirect)
-    logger.info(f"Precision: {precision}")
-    if float(TPdirect + FN)>0:
-        recall = TPdirect / float(TPdirect + FN)
-    logger.info(f"Recall: {recall}")
-    if (precision + recall) > 0:
-        F1direct = 2 * (precision * recall) / (precision + recall)
-    else:
-        F1direct = 0.
-    logger.info(f"F1 score: {F1direct}")
-    return FP, TP, FPdirect, TPdirect, FN, FPs, FPsdirect, TPs, TPsdirect, FNs, F1, F1direct
 
 # 评估模型
 def evaluate_model(model, test_loader, device, max_samples=200):

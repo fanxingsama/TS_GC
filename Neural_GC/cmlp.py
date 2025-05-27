@@ -189,7 +189,6 @@ def train_model_ista(cmlp, X, lr, max_iter, lam=0, lam_ridge=0, penalty='H',
     best_loss = np.inf
     best_model = None
 
-    # 使用i:i+1而不使用i是为了保持三维的形状，让输出维度和目标相匹配，使用i就是二维了
     loss = sum([loss_fn(cmlp.networks[i](X[:, :-1]), X[:, lag:, i:i+1])
                 for i in range(p)])
     ridge = sum([ridge_regularize(net, lam_ridge) for net in cmlp.networks])

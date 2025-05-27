@@ -26,9 +26,9 @@ class MultiTCN(nn.Module):
         }
         
         # 为每个时间序列创建单独的TCN
-        self.tcn_processors = nn.ModuleList()
+        self.networks = nn.ModuleList()
         for i in range(self.series_num):
-            self.tcn_processors.append(
+            self.networks.append(
                 GrangerTCN(input_series_num=self.series_num,
                           output_size=tcn_channels,
                           TCN_hidden_channels=tcn_channels,
@@ -77,7 +77,7 @@ class MultiTCN(nn.Module):
             # other_series = x_tcn_input[:, mask, :]  # [batch_size, series_num-1, input_window]
             
             # 通过TCN处理
-            tcn_out = self.tcn_processors[i](x_tcn_input)  # [batch_size, tcn_channels, input_window]
+            tcn_out = self.networks[i](x_tcn_input)  # [batch_size, tcn_channels, input_window]
             all_tcn_outputs.append(tcn_out)
 
         stacked_outputs = torch.stack(all_tcn_outputs, dim=1)  # 堆叠成为第一维张量，[batch_size, series_num, tcn_channels, input_window]
@@ -115,7 +115,7 @@ class MultiTCN(nn.Module):
             gc_matrix = torch.zeros(self.series_num, self.series_num, device=device_to_use)
         else:
             # 获取卷积核大小
-            kernel_size = self.tcn_processors[0].get_first_block_conv1_weights().shape[2]
+            kernel_size = self.networks[0].get_first_block_conv1_weights().shape[2]
             gc_matrix = torch.zeros(self.series_num, self.series_num, kernel_size, device=device_to_use)
         
         for i in range(self.series_num):  # 目标序列
@@ -146,4 +146,4 @@ class MultiTCN(nn.Module):
         获取所有TCN的第一层卷积权重
         返回一个字典，键为序列索引，值为对应的卷积权重
         """
-        return [net.get_first_block_conv1_weights() for net in self.tcn_processors]
+        return [net.get_first_block_conv1_weights() for net in self.networks]

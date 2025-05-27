@@ -109,7 +109,7 @@ class GrangerTCN(nn.Module):
                           padding=padding,
                           dropout=dropout)
         )
-    def get_first_block_conv1_weights(self):
+    def get_first_conv_weights(self):
         return self.network_layers[0].conv1.weight
 
     def forward(self, x):
