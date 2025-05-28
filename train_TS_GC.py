@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 # 假设 MutiTS_GC 在名为 model_TS_GC.py 的文件中，或者在 Canvas 中提供的 TS_GC.py 文件中
 # from model.TS_GC import MutiTS_GC # 根据您的项目结构调整
 # 如果 TS_GC.py 与此脚本在同一目录或Python路径中:
+from logger.logger import get_logger, setup_logging
 from model.TS_GC import MutiTS_GC
 from util import simulate_var
 
@@ -22,76 +23,41 @@ from util import simulate_var
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
-def PGD_update(weight_tensor, lam, lr, penalty):
-    # weight_tensor 的形状: [out_channels, in_channels/groups, kernel_size]
-    # 对应到 cmlp.py 中的 W (hidden, p, lag)
-    # out_channels -> hidden (feature_dim)
-    # in_channels/groups -> p (series_num)
-    # kernel_size -> lag (kernel_size for first_conv)
-    feature_dim, series_num_in_group, kernel_s = weight_tensor.shape
-
-    if penalty == 'GL':
-        norm = torch.norm(weight_tensor, dim=(0, 2), keepdim=True) # Group Lasso over feature_dim and kernel_size
-        weight_tensor.data = ((weight_tensor / torch.clamp(norm, min=(lr * lam)))
-                              * torch.clamp(norm - (lr * lam), min=0.0))
-    elif penalty == 'GSGL':
-        # GSGL typically has two norms.
-        # Norm over series_num_in_group (dim=1 for Conv1D weights if groups=1)
-        norm1 = torch.norm(weight_tensor, dim=1, keepdim=True) # Group over input series
-        weight_tensor.data = ((weight_tensor / torch.clamp(norm1, min=(lr * lam)))
-                              * torch.clamp(norm1 - (lr * lam), min=0.0))
-        # Norm over feature_dim and kernel_size (dim=(0,2))
-        norm2 = torch.norm(weight_tensor, dim=(0, 2), keepdim=True) # Group over output features and kernel taps
-        weight_tensor.data = ((weight_tensor / torch.clamp(norm2, min=(lr * lam)))
-                              * torch.clamp(norm2 - (lr * lam), min=0.0))
-    elif penalty == 'H': # Hierarchical over kernel_size
-        for i in range(kernel_s):
-            # Norm over feature_dim and first (i+1) kernel taps, and all input series
-            norm = torch.norm(weight_tensor[:, :, :(i + 1)], dim=(0, 1, 2), keepdim=True)
-            # Corrected: norm should be taken across relevant dimensions for hierarchical sparsity on kernel taps
-            # A common way for hierarchical on kernel is to sum norms of weights up to a certain lag
-            # For Conv1D weights [out_channels, in_channels, kernel_size]
-            # Hierarchical on kernel_size means penalizing groups of [out_channels, in_channels, 0:k]
-            norm_hier = torch.norm(weight_tensor[:, :, :(i + 1)].flatten(start_dim=0, end_dim=1), p=2, dim=0, keepdim=True) # Norm over [out_channels, in_channels] for each tap group
-            
-            # The original cmlp.py PGD for H was:
-            # norm = torch.norm(W[:, :, :(i + 1)], dim=(0, 2), keepdim=True)
-            # W.data[:, :, :(i+1)] = ( (W.data[:, :, :(i+1)] / torch.clamp(norm, min=(lr * lam))) * torch.clamp(norm - (lr * lam), min=0.0))
-            # Here, W has shape (hidden, p, lag).
-            # For our weight_tensor (feature_dim, series_num, kernel_s):
-            # dim 0 is feature_dim (hidden), dim 1 is series_num (p), dim 2 is kernel_s (lag)
-            # So, dim=(0,1) for norm on W[:, :, :(i+1)] if we want to group over feature_dim and series_num for each lag group
-            
-            current_slice = weight_tensor[:, :, :(i + 1)]
-            # Norm for hierarchical group lasso on kernel taps: for each (feature_dim, series_num) pair, take norm over kernel taps up to i
-            # This interpretation might be different from cmlp.py if its 'p' is not series_num for the first layer.
-            # Let's stick to cmlp.py's interpretation of W's dims for H penalty:
-            # W.shape = (hidden, p, lag) -> (feature_dim, series_num, kernel_size)
-            # norm over dim (0,2) means norm over (feature_dim, kernel_size_slice) for each series_num 'p'
-            # This seems unusual for typical Conv1D weight interpretation.
-            # Let's assume the PGD_update from cmlp.py is intended to be applied as is,
-            # mapping W's dims to weight_tensor's dims.
-            # W (hidden, p, lag) -> weight_tensor (out_channels, in_channels, kernel_size)
-            # So, dim=(0,2) in cmlp.py corresponds to dim=(0,2) for weight_tensor.
-            norm = torch.norm(current_slice, dim=(0, 2), keepdim=True)
-            slice_data = current_slice.data
-            slice_data = ((slice_data / torch.clamp(norm, min=(lr*lam))) * torch.clamp(norm - (lr*lam), min=0.0))
-            weight_tensor.data[:, :, :(i+1)] = slice_data
-
+def PGD_update(network, lam, lr, penalty):
+    hidden, p, lag = network.shape
+    if penalty == 'GL': # 组Loss惩罚
+        norm = torch.norm(network, dim=(0, 2), keepdim=True) # 得到每一列的L2范数
+        # torch.clamp把norm的值限制如果小于lr * lam，就变成lr * lam
+        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
+                        # 限制如果norm - (lr * lam) 小于 0.0，把其置为0
+                  * torch.clamp(norm - (lr * lam), min=0.0))
+    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
+        norm = torch.norm(network, dim=0, keepdim=True)
+        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
+                  * torch.clamp(norm - (lr * lam), min=0.0))
+        norm = torch.norm(network, dim=(0, 2), keepdim=True)
+        network.data = ((network / torch.clamp(norm, min=(lr * lam)))
+                  * torch.clamp(norm - (lr * lam), min=0.0))
+    elif penalty == 'H': # 层次Lasso惩罚
+        for i in range(lag):
+            norm = torch.norm(network[:, :, :(i + 1)], dim=(0, 2), keepdim=True)
+            network.data[:, :, :(i+1)] = (
+                (network.data[:, :, :(i+1)] / torch.clamp(norm, min=(lr * lam)))
+                * torch.clamp(norm - (lr * lam), min=0.0))
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
-def lasso_penalty(weight_tensor, lam, penalty):
-    feature_dim, series_num_in_group, kernel_s = weight_tensor.shape
-    if penalty == 'GL':
-        return lam * torch.sum(torch.norm(weight_tensor, dim=(0, 2)))
-    elif penalty == 'GSGL':
-        return lam * (torch.sum(torch.norm(weight_tensor, dim=(0, 2)))
-                      + torch.sum(torch.norm(weight_tensor, dim=1))) # sum of norms over input series
-    elif penalty == 'H':
-        # Original cmlp.py: sum([torch.sum(torch.norm(W[:, :, :(i+1)], dim=(0, 2))) for i in range(lag)])
-        return lam * sum([torch.sum(torch.norm(weight_tensor[:, :, :(i+1)], dim=(0, 2)))
-                          for i in range(kernel_s)])
+# 稀疏惩罚的结果
+def lasso_penalty(network, lam, penalty):
+    hidden, p, lag = network.shape
+    if penalty == 'GL': # 组Loss惩罚
+        return lam * torch.sum(torch.norm(network, dim=(0, 2)))
+    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
+        return lam * (torch.sum(torch.norm(network, dim=(0, 2)))
+                      + torch.sum(torch.norm(network, dim=0)))
+    elif penalty == 'H': # 层次Lasso惩罚
+        return lam * sum([torch.sum(torch.norm(network[:, :, :(i+1)], dim=(0, 2)))
+                          for i in range(lag)])
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
@@ -114,7 +80,7 @@ def create_sequences(data_df, input_window, output_window, series_cols):
 class TS_GC_Trainer:
     def __init__(self, model, epochs, save_dir, criterion, lr, device, series_num,
                  X_full, Y_full, penalty_type, lasso_param, ridge_param, 
-                 check_every, lookback=5, logger=None, verbose=1):
+                 check_every=10, lookback=5, logger=None, verbose=1):
         self.model = model
         self.epochs = epochs # These are ISTA iterations
         self.save_dir = save_dir
@@ -268,25 +234,23 @@ class TS_GC_Trainer:
 
 
 def main():
-    DATA_PATH = 'data/simu_data/series_data.csv' # 数据路径
-    INPUT_WINDOW = 10   # 例如: 使用过去50个时间点
-    OUTPUT_WINDOW = 1   # 例如: 预测未来1个时间点
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    EPOCHS = 20000       # ISTA iterations
-    LR = 0.01         # 学习率 for ISTA
-    LASSO_PARAM = 0.001  # Lasso (L1) 正则化参数
-    RIDGE_PARAM = 0.01 # Ridge (L2) 正则化参数 for other layers
-    PENALTY_TYPE = 'GL' # 'GL', 'GSGL', or 'H'
-    CHECK_EVERY = 10    # 每多少次ISTA迭代记录一次损失
-    LOOKBACK = 4        # 早停参数: (lookback * check_every) iterations without improvement
-    
-    FEATURE_DIM = 64    # MutiTS_GC 参数
-    KERNEL_SIZE = 3     # MutiTS_GC 参数
-    DROPOUT = 0.1       # MutiTS_GC 参数
-    TEMPORAL_LAYERS = 2 # MutiTS_GC 参数
-
     run_id = datetime.now().strftime(r'%m-%d_%H-%M-%S')
     save_dir = Path('saved') / run_id
+    setup_logging(save_dir)
+    train_logger = get_logger() # 日志记录器
+    DATA_PATH = 'data/simu_data/series_data.csv' # 数据路径
+    INPUT_WINDOW = 5
+    OUTPUT_WINDOW = 1  
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    LR = 0.01      
+    LASSO_PARAM = 0.02  
+    RIDGE_PARAM = 0.01 
+    PENALTY_TYPE = 'H'  
+    FEATURE_DIM = 64
+    KERNEL_SIZE = 5    
+    DROPOUT = 0      
+    TEMPORAL_LAYERS = 2 
+    loss_function = nn.MSELoss(reduction='mean')
 
     # 1. Load data
     data_df = pd.read_csv(DATA_PATH)
@@ -305,14 +269,11 @@ def main():
         dropout=DROPOUT,
         device=DEVICE
     ).to(DEVICE)
-    
-    # 4. Initialize loss function
-    loss_function = nn.MSELoss(reduction='mean') # Or your preferred loss
 
     # 5. Initialize trainer
     trainer = TS_GC_Trainer(
         model=model, 
-        epochs=EPOCHS, 
+        epochs=20000, 
         save_dir=save_dir, 
         criterion=loss_function,
         lr=LR, 
@@ -323,22 +284,31 @@ def main():
         penalty_type=PENALTY_TYPE, 
         lasso_param=LASSO_PARAM,
         ridge_param=RIDGE_PARAM,
-        check_every=CHECK_EVERY,
-        lookback=LOOKBACK,
         verbose=1
     )
     
-    # 6. Train model
-    print("Starting ISTA training...")
-    train_losses = trainer.train(save_model=True)
-    
-    if train_losses: # Check if training actually ran
-        trainer.plot_training_curves()
-        print(f"Training completed. Best loss: {trainer.best_loss:.6f} at iteration {trainer.best_it}")
-    else:
-        print("Training did not produce any loss records.")
+    trainer.train(save_model=True)
+    trainer.plot_training_curves()
 
     trainer.cleanup()
+    log_message = (
+    f"本次所使用的模型参数和训练参数如下：\n"
+    f"模型架构:\n"
+    f"  - 模型: {model}\n"
+    f"模型参数:\n"
+    f"  - feature_dim: {FEATURE_DIM}\n"
+    f"  - kernel_size: {KERNEL_SIZE}\n"
+    f"  - dropout: {DROPOUT}\n"
+    f"训练参数:\n"
+    f"  - 损失函数: {loss_function}\n"
+    f"  - 数据路径: {DATA_PATH}\n"
+    f"  - 学习率: {LR}\n"
+    f"  - Lasso 参数: {LASSO_PARAM}\n"
+    f"  - 正则化类型: {PENALTY_TYPE}\n"
+    f"  - 序列数量: {SERIES_NUM}\n"
+)
+
+    train_logger.info(log_message)
     
 if __name__ == '__main__':
     main()

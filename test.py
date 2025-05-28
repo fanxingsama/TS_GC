@@ -8,7 +8,10 @@ from matplotlib import rcParams
 import pandas as pd
 import os
 
-from model.TS_GC import MutiTS_GC
+try:
+    from TS_GC import MutiTS_GC 
+except ImportError:
+    from model.TS_GC import MutiTS_GC
 
 
 rcParams['font.family'] = 'SimHei'
@@ -16,10 +19,13 @@ rcParams['axes.unicode_minus'] = False
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def load_model_original_logic(model_path, device):
+def load_model(model_path, device):
     config_path = model_path / "model_config_ista.pkl"
     if not config_path.exists():
-        raise FileNotFoundError(f"Model config not found at {config_path}")
+        config_path = model_path / "model_config.pkl"
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Model config not found at {model_path / 'model_config_ista.pkl'} or {model_path / 'model_config.pkl'}")
 
     saved_config = joblib.load(config_path)
     
@@ -36,7 +42,10 @@ def load_model_original_logic(model_path, device):
     
     model_weight_path = model_path / "best_model_ista.pth"
     if not model_weight_path.exists():
-        raise FileNotFoundError(f"Model weights not found at {model_weight_path}")
+        model_weight_path = model_path / "best_model.pth"
+
+    if not model_weight_path.exists():
+        raise FileNotFoundError(f"Model weights not found at {model_path / 'best_model_ista.pth'} or {model_path / 'best_model.pth'}")
 
     model.load_state_dict(torch.load(model_weight_path, map_location=device))
     model.eval() 
@@ -66,38 +75,47 @@ def load_ground_truth_gc_matrix(csv_path, series_num):
             continue
     return GC_true
 
-def plot_gc_comparison_figure(GC_true, GC_est, series_num, save_path):
-    if GC_true is None or GC_est is None:
-        print("无法绘制GC矩阵，因为真实矩阵或估计矩阵未能加载。")
+def plot_gc_comparison_figure(GC_true, GC_est_binary, GC_est_norms, series_num, save_path):
+    if GC_true is None or GC_est_binary is None or GC_est_norms is None:
+        print("无法绘制GC矩阵，因为真实矩阵或估计矩阵（二值或范数）未能加载。")
         return
-    if GC_true.shape != (series_num, series_num) or GC_est.shape != (series_num, series_num):
-        print(f"错误: 真实GC矩阵形状 {GC_true.shape} 或估计GC矩阵形状 {GC_est.shape} 与期望的 ({series_num}, {series_num}) 不符。")
+    if not (GC_true.shape == (series_num, series_num) and \
+            GC_est_binary.shape == (series_num, series_num) and \
+            GC_est_norms.shape == (series_num, series_num)):
+        print(f"错误: 矩阵形状不一致或与期望的 ({series_num}, {series_num}) 不符。")
+        print(f"GC_true shape: {GC_true.shape}, GC_est_binary shape: {GC_est_binary.shape}, GC_est_norms shape: {GC_est_norms.shape}")
         return
 
-    fig, axarr = plt.subplots(1, 2, figsize=(16, 7))
+    fig, axarr = plt.subplots(1, 2, figsize=(18, 8)) 
     
     axarr[0].imshow(GC_true, cmap='Blues', aspect='auto')
-    axarr[0].set_title('GC actual')
-    axarr[0].set_ylabel('Affected series')
-    axarr[0].set_xlabel('Causal series')
+    axarr[0].set_title('真实格兰杰因果矩阵 (GC actual)')
+    axarr[0].set_ylabel('受影响的序列 (Effect series)')
+    axarr[0].set_xlabel('原因序列 (Causal series)')
     axarr[0].set_xticks(np.arange(series_num))
     axarr[0].set_yticks(np.arange(series_num))
     axarr[0].set_xticklabels(np.arange(series_num))
     axarr[0].set_yticklabels(np.arange(series_num))
 
-    
-    axarr[1].imshow(GC_est, cmap='Blues', vmin=0, vmax=1, aspect='auto', extent=(-0.5, series_num-0.5, series_num-0.5, -0.5))
-    axarr[1].set_title('GC estimated')
-    axarr[1].set_ylabel('Affected series')
-    axarr[1].set_xlabel('Causal series')
+    img_est_norms = axarr[1].imshow(GC_est_norms, cmap='Blues', aspect='auto', 
+                                    extent=(-0.5, series_num-0.5, series_num-0.5, -0.5))
+    axarr[1].set_title('模型估计的GC (权重范数和差异)')
+    axarr[1].set_ylabel('受影响的序列 (Effect series)')
+    axarr[1].set_xlabel('原因序列 (Causal series)')
     axarr[1].set_xticks(np.arange(series_num))
     axarr[1].set_yticks(np.arange(series_num))
     axarr[1].set_xticklabels(np.arange(series_num))
     axarr[1].set_yticklabels(np.arange(series_num))
+    
+    fig.colorbar(img_est_norms, ax=axarr[1], orientation='vertical', fraction=0.046, pad=0.04)
 
     for i in range(series_num): 
         for j in range(series_num): 
-            if GC_true[i, j] != GC_est[i, j]:
+            norm_val = GC_est_norms[i, j]
+            text_color = "white" if norm_val > (GC_est_norms.max() / 2) else "black"
+            axarr[1].text(j, i, f"{norm_val:.2f}", ha="center", va="center", color=text_color, fontsize=8)
+            
+            if GC_true[i, j] != GC_est_binary[i, j]:
                 rect = plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor='none', edgecolor='red', linewidth=1.5)
                 axarr[1].add_patch(rect)
     
@@ -186,21 +204,25 @@ def plot_prediction_comparison_figure(predictions, actuals, series_num, output_w
     plt.close(fig)
     print(f"预测对比图已保存至: {save_plot_path}")
 
-def get_latest_run_id_original_logic():
-    base_path = Path('saved')
+def get_latest_run_id(base_dir_name='saved_ista_models'):
+    base_path = Path(base_dir_name)
     if not base_path.exists():
-        print(f"模型保存目录 '{base_path}' 未找到。")
-        return None
+        base_path = Path('saved') 
+        if not base_path.exists():
+            print(f"模型保存目录 '{base_dir_name}' 和 'saved' 均未找到。")
+            return None
     
-    pattern = re.compile(r'^\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
-    timestamps = [d.name for d in base_path.iterdir() 
-                 if d.is_dir() and pattern.match(d.name)]
-    
-    if not timestamps:
-        print(f"在 '{base_path}' 中未找到符合格式 'MM-DD_HH-MM-SS' 的运行ID。")
-        return None
-    return max(timestamps)
+    pattern_ista = re.compile(r'^\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_ista$')
+    pattern_general = re.compile(r'^\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(_.*)?$')
 
+    sub_dirs = [d for d in base_path.iterdir() if d.is_dir()]
+    
+    ista_dirs = sorted([d.name for d in sub_dirs if pattern_ista.match(d.name)], reverse=True)
+    if ista_dirs:
+        return ista_dirs[0]
+
+    general_dirs = sorted([d.name for d in sub_dirs if pattern_general.match(d.name)], reverse=True)
+    return general_dirs[0] if general_dirs else None
 
 def main(specified_run_id=None):
     GROUND_TRUTH_GC_PATH = Path('data/simu_data/granger_causality.csv')
@@ -211,18 +233,20 @@ def main(specified_run_id=None):
 
     if specified_run_id:
         run_id = specified_run_id
-        model_path = Path('saved') / run_id 
+        model_base_dir = 'saved_ista_models' if '_ista' in run_id or Path('saved_ista_models/' + run_id).exists() else 'saved'
+        model_path = Path(model_base_dir) / run_id
     else:
-        run_id = get_latest_run_id_original_logic()
+        run_id = get_latest_run_id()
         if run_id is None:
-            print("未找到已保存的模型运行ID。")
+            print("未找到已保存的模型。")
             return
-        model_path = Path('saved') / run_id
+        model_base_dir = 'saved_ista_models' if '_ista' in run_id else 'saved'
+        model_path = Path(model_base_dir) / run_id
 
     print(f"尝试从以下路径加载模型: {model_path}")
     
     try:
-        model, saved_config = load_model_original_logic(model_path, DEVICE)
+        model, saved_config = load_model(model_path, DEVICE)
     except FileNotFoundError as e:
         print(f"加载模型失败: {e}")
         return
@@ -237,10 +261,14 @@ def main(specified_run_id=None):
     if GC_true is None:
         print("警告: 无法加载真实格兰杰因果矩阵，跳过GC对比。")
     else:
-        GC_est_tensor = model.GC(threshold=True, ignore_kernel=True, weight_threshold=0.0)
-        GC_est = GC_est_tensor.cpu().numpy().astype(int)
-        plot_gc_comparison_save_path = model_path / "gc_matrix_comparison.png"
-        plot_gc_comparison_figure(GC_true, GC_est, series_num, plot_gc_comparison_save_path)
+        GC_est_binary_tensor = model.GC(threshold=True, ignore_kernel=True, weight_threshold=0.0)
+        GC_est_binary = GC_est_binary_tensor.detach().cpu().numpy().astype(int) # 添加 .detach()
+        
+        GC_est_norms_tensor = model.GC(threshold=False, ignore_kernel=True) 
+        GC_est_norms = GC_est_norms_tensor.detach().cpu().numpy() # 添加 .detach()
+
+        plot_gc_comparison_save_path = model_path / "gc_matrix_comparison_with_norms.png"
+        plot_gc_comparison_figure(GC_true, GC_est_binary, GC_est_norms, series_num, plot_gc_comparison_save_path)
 
     # --- 2. 预测值与实际值对比 ---
     print(f"\n开始加载数据进行预测对比，路径: {DATA_FOR_PREDICTION_PATH}")
@@ -276,7 +304,4 @@ def main(specified_run_id=None):
 
 
 if __name__ == "__main__":
-    # 如果要测试特定的运行ID，可以取消注释并设置它
-    # specific_run_id_to_test = "05-27_10-00-00" # 请替换为您的实际run_id (无_ista后缀)
-    # main(specified_run_id=specific_run_id_to_test)
     main()
