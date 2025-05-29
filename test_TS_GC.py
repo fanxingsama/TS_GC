@@ -8,12 +8,14 @@ from matplotlib import rcParams
 import pandas as pd
 from config import *
 
+from logger.logger import get_logger, setup_logging
 from model.TS_GC import MutiTS_GC
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def load_model(model_path, device):
     config_path = model_path / "model_config.pkl"
@@ -122,7 +124,7 @@ def plot_gc_compare(pred_csv_path, true_csv_path, series_num, save_path, show_we
     print(f"格兰杰因果矩阵对比图已保存至: {save_path}")
 
 # 混淆矩阵
-def confusion_metrics(pred_csv_path, true_csv_path, series_num):
+def model_eval(pred_csv_path, true_csv_path, series_num):
     GC_true = np.zeros((series_num, series_num), dtype=int)
     true_df = pd.read_csv(true_csv_path, header=None)
     for _, row in true_df.iterrows():
@@ -157,11 +159,24 @@ def confusion_metrics(pred_csv_path, true_csv_path, series_num):
                 FP += 1
             elif true_val == 1 and pred_val == 0:
                 FN += 1
-                
-    return TP, TN, FP, FN
+    accuracy = 0.0
+    precision = 0.0
+    recall = 0.0
+    f1_score = 0.0
+
+    total_samples = TP + TN + FP + FN
+    accuracy = (TP + TN) / total_samples
+    if TP + FP > 0:
+        precision = TP / (TP + FP)
+    if TP + FN > 0:
+        recall = TP / (TP + FN)
+    if precision + recall > 0:
+        f1_score = 2 * (precision * recall) / (precision + recall)
+    
+    return accuracy, precision, recall, f1_score
 
 # 绘制预测结果与实际值的对比图
-def plot_prediction_compare(model,  X_data, Y_data, series_num, num_series_to_plot=5, points_to_plot=300, max_samples=300):
+def prediction_compare(model, X_data, Y_data, series_num, num_series_to_plot=5, points_to_plot=300, max_samples=300):
     num_samples_to_process = min(X_data.shape[0], max_samples)
 
     X_data_subset = X_data[:num_samples_to_process].to(DEVICE)
@@ -171,6 +186,14 @@ def plot_prediction_compare(model,  X_data, Y_data, series_num, num_series_to_pl
         model_preds = model(X_data_subset) 
         predictions_np = model_preds.cpu().numpy()
         actuals_np = Y_data_subset.cpu().numpy()
+
+    # 计算MAE和MSE
+    mae = np.mean(np.abs(predictions_np - actuals_np))
+    mse = np.mean((predictions_np - actuals_np) ** 2)
+    
+    # 计算每个序列的MAE和MSE
+    series_mae = np.mean(np.abs(predictions_np - actuals_np), axis=(0, 1))  # 对样本和时间步求均值
+    series_mse = np.mean((predictions_np - actuals_np) ** 2, axis=(0, 1))
 
     num_available_points = predictions_np.shape[0]
     points_to_plot = min(points_to_plot, num_available_points)
@@ -188,7 +211,7 @@ def plot_prediction_compare(model,  X_data, Y_data, series_num, num_series_to_pl
         ax = axes[i]
         ax.plot(time_axis, actuals_np[:points_to_plot, output_step_idx, series_idx], label='实际值', color='blue')
         ax.plot(time_axis, predictions_np[:points_to_plot, output_step_idx, series_idx], label='预测值', color='red', linestyle='--')
-        ax.set_title(f'序列 {series_idx} - 预测对比 (前 {points_to_plot} 点, 输出步 {output_step_idx+1})')
+        ax.set_title(f'序列 {series_idx} - 预测对比 - MAE: {series_mae[series_idx]:.4f}, MSE: {series_mse[series_idx]:.4f}')
         ax.set_ylabel('值')
         ax.legend()
         ax.grid(True)
@@ -199,6 +222,71 @@ def plot_prediction_compare(model,  X_data, Y_data, series_num, num_series_to_pl
     plt.savefig(save_plot_path)
     plt.close(fig)
     print(f"预测对比图已保存至: {save_plot_path}")
+    
+    return mae, mse
+
+# 计算每个目标序列的主导因果滞后
+def plot_first_layer_weights_heatmap(model, target_series_idx, save_path=None, use_abs_weights=True):
+    """
+    为指定目标序列的第一个卷积层权重绘制热力图。
+    热力图展示了每个输入序列在不同滞后上的聚合影响强度。
+
+    参数:
+        model (MutiTS_GC): 训练好的 MutiTS_GC 模型。
+        target_series_idx (int): 要可视化其权重的目标序列的索引。
+        save_path (str, optional): 图像保存路径。如果为 None，则显示图像。
+        use_abs_weights (bool): 是否使用权重的绝对值进行可视化。默认为 True。
+    """
+    if not (0 <= target_series_idx < model.series_num):
+        print(f"错误: target_series_idx ({target_series_idx}) 超出范围 [0, {model.series_num-1}]")
+        return
+
+    # 1. 获取权重
+    # W_target 的形状: (feature_dim, series_num_input, kernel_size)
+    W_target = model.networks[target_series_idx].first_conv.weight.detach().cpu()
+
+    # 提取维度信息
+    num_input_series = W_target.shape[1] # 这应该等于 model.series_num
+    kernel_size = W_target.shape[2]
+
+    # 2. 处理权重 (取绝对值或不取)
+    if use_abs_weights:
+        processed_weights = torch.abs(W_target)
+        plot_title_suffix = " (绝对值聚合)"
+        cmap = 'Reds' # 使用红色系，值越大颜色越深
+    else:
+        processed_weights = W_target
+        plot_title_suffix = " (原始值聚合)"
+        cmap = 'coolwarm' # 使用冷暖色系，可以区分正负值
+
+    # 3. 聚合特征维度
+    # aggregated_weights 的形状: (num_input_series, kernel_size)
+    aggregated_weights = torch.sum(processed_weights, dim=0).numpy()
+
+    # 4. 绘制热力图
+    plt.figure(figsize=(max(8, kernel_size * 0.6), max(6, num_input_series * 0.4)))
+    plt.imshow(aggregated_weights, aspect='auto', cmap=cmap, interpolation='nearest')
+
+    plt.colorbar(label='聚合权重强度')
+    plt.title(f'目标序列 {target_series_idx} 的第一个卷积层权重热力图{plot_title_suffix}')
+    plt.xlabel('滞后 (Lag)')
+    plt.ylabel('输入序列索引 (Causative Series Index)')
+
+    # 设置刻度
+    plt.xticks(np.arange(kernel_size), labels=np.arange(kernel_size))
+    plt.yticks(np.arange(num_input_series), labels=np.arange(num_input_series))
+
+    # 添加网格线，使单元格更清晰
+    ax = plt.gca()
+    ax.set_xticks(np.arange(kernel_size + 1) - 0.5, minor=True)
+    ax.set_yticks(np.arange(num_input_series + 1) - 0.5, minor=True)
+    ax.grid(which="minor", color="grey", linestyle='-', linewidth=0.5)
+    ax.tick_params(which="minor", size=0)
+    plt.tight_layout()
+
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"权重热力图已保存至: {save_path}")
 
 def get_latest_run_id():
     base_path = Path('saved')
@@ -253,7 +341,13 @@ def main(model_path):
     
     save_gc_matrix_to_csv(model, model_path / "GC_matrix.csv", threshold=0.0)
     plot_gc_compare(gc_predict_path, GC_PATH, SERIES_NUM, model_path / "GC_predict.png")
-    plot_prediction_compare(model, X_DATA, Y_DATA, SERIES_NUM)
+    mae, mse = prediction_compare(model, X_DATA, Y_DATA, SERIES_NUM)
+    
+    accuracy, precision, recall, f1_score = model_eval(gc_predict_path, GC_PATH, SERIES_NUM)
+    log_file_path = model_path / "model_test_info.log"
+    with open(log_file_path, 'w', encoding='utf-8') as log_file:
+        log_file.write(f"模型评估结果:\n 准确率: {accuracy:.2f}, 精确率: {precision:.2f}, 召回率: {recall:.2f}, F1分数: {f1_score:.2f}\n MAE: {mae:.2f}, MSE: {mse:.2f}\n")
+    plot_first_layer_weights_heatmap(model, 1, save_path=model_path / "first_layer_weights_heatmap.png", use_abs_weights=True)
 
 if __name__ == "__main__":
     run_id = get_latest_run_id()

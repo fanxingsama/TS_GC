@@ -22,7 +22,11 @@ N_TRIALS = 50 # Optuna 的试验次数
 STUDY_NAME = "optuna"
 STORAGE_PATH = f"sqlite:///{STUDY_NAME}.db"
 
+overall_best_loss_optuna = float('inf')
+overall_best_model_state_optuna = None
+
 def objective(trial, logger, save_dir):
+    global overall_best_loss_optuna, overall_best_model_state_optuna
     # 模型参数参数
     kernel_size = trial.suggest_categorical('kernel_size', [3, 5]) 
     temporal_layers = trial.suggest_categorical('temporal_layers', [2, 3, 4])
@@ -30,7 +34,7 @@ def objective(trial, logger, save_dir):
     
     # 训练参数
     dropout = trial.suggest_float('dropout', 0, 0.3)
-    lr = trial.suggest_float('lr', 0.0001, 0.01, log=True) # 学习率
+    lr = trial.suggest_float('lr', 0.006, 0.05, log=True) # 学习率
     lasso_param = trial.suggest_float('lasso_param', 0.001, 1, log=True) 
     ridge_param = trial.suggest_float('ridge_param', 0.001, 0.1, log=True)
     loss_functions_list = {
@@ -75,11 +79,13 @@ def objective(trial, logger, save_dir):
     )
     
     best_loss= trainer.train()
+    best_model_state = trainer.best_model_state
     
-    best_model_state = TS_GC_Trainer.best_model_state
-    trial.set_user_attr('best_model_state', best_model_state)
+    if best_loss < overall_best_loss_optuna:
+        overall_best_loss_optuna = best_loss
+        overall_best_model_state_optuna = best_model_state
     
-    TS_GC_Trainer.cleanup()
+    trainer.cleanup()
     del model
     
     logger.info(f"Trial {trial.number} 完成。验证集 loss: {best_loss:.6f}")
@@ -87,10 +93,16 @@ def objective(trial, logger, save_dir):
     return best_loss
 
 def begin_optuna(save_dir, logger):
+    global overall_best_loss_optuna, overall_best_model_state_optuna
+    
+    # 为新的 Optuna study 初始化/重置全局最佳追踪变量
+    overall_best_loss_optuna = float('inf')
+    overall_best_model_state_optuna = None
+    
     study = optuna.create_study(
         study_name=STUDY_NAME,
-        # storage=STORAGE_PATH,
-        # load_if_exists=True,
+        storage=STORAGE_PATH,
+        load_if_exists=True,
         direction='minimize' # 修改优化目标为最小化
     )
     optuna.logging.set_verbosity(optuna.logging.WARNING) # 设置 Optuna 的日志级别为警告级别
@@ -117,7 +129,8 @@ def begin_optuna(save_dir, logger):
         logger.info(f"    {key}: {value}")
 
     joblib.dump(best_params, save_dir / "model_config.pkl")
-    torch.save(best_trial.user_attrs['best_model_state'], save_dir / "best_model.pth")
+    if overall_best_model_state_optuna is not None:
+        torch.save(overall_best_model_state_optuna, save_dir / "best_model.pth")
     return completed_trials, best_trial
 
 # ---  可视化optuna优化过程 ---
