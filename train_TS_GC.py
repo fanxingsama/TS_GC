@@ -9,16 +9,12 @@ from pathlib import Path
 import gc
 from copy import deepcopy
 import numpy as np
+from config import *
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# 假设 MutiTS_GC 在名为 model_TS_GC.py 的文件中，或者在 Canvas 中提供的 TS_GC.py 文件中
-# from model.TS_GC import MutiTS_GC # 根据您的项目结构调整
-# 如果 TS_GC.py 与此脚本在同一目录或Python路径中:
 from logger.logger import get_logger, setup_logging
 from model.TS_GC import MutiTS_GC
-from util import simulate_var
-
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -61,21 +57,6 @@ def lasso_penalty(network, lam, penalty):
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
 
-
-def create_sequences(data_df, input_window, output_window, series_cols):
-    X_list, Y_list = [], []
-    data_np = data_df[series_cols].values
-    num_timesteps, num_series = data_np.shape
-
-    for i in range(num_timesteps - input_window - output_window + 1):
-        X_list.append(data_np[i : i + input_window, :])
-        Y_list.append(data_np[i + input_window : i + input_window + output_window, :])
-
-    X = torch.tensor(np.array(X_list), dtype=torch.float32)
-    Y = torch.tensor(np.array(Y_list), dtype=torch.float32)
-    # Expected X: [num_samples, input_window, series_num]
-    # Expected Y: [num_samples, output_window, series_num]
-    return X, Y
 
 class TS_GC_Trainer:
     def __init__(self, model, epochs, save_dir, criterion, lr, device, series_num,
@@ -121,7 +102,6 @@ class TS_GC_Trainer:
             if not is_first_layer_weight:
                  self.other_params_for_ridge.append(param)
 
-
     def train(self, save_model=False):
         for ista_iter in range(self.epochs):
             current_smooth_loss, total_mse_loss, ridge_loss_val = self._compute_smooth_loss(self.X_full, self.Y_full)
@@ -142,7 +122,7 @@ class TS_GC_Trainer:
                         if weight_tensor is not None: # Should always be not None
                              PGD_update(weight_tensor, self.lasso_param, self.base_lr, self.penalty_type)
             
-            # 5. Monitoring and Early Stopping (operates on full dataset metrics)
+            # 定期检查
             if (ista_iter + 1) % self.check_every == 0:
                 with torch.no_grad(): # Ensure no gradients are computed for monitoring
                     # Re-calculate smooth loss with updated parameters
@@ -154,8 +134,9 @@ class TS_GC_Trainer:
                 
                 if self.verbose > 0:
                     print(f"{'='*10} ISTA Iter = {ista_iter + 1} {'='*10}")
-                    print(f"Smooth Loss = {mean_loss.item():.6f}-------MSE Loss = {total_mse_loss.item():.6f} - Ridge Loss = {ridge_loss_val.item():.6f}")
+                    print(f"Smooth Loss = {mean_loss.item():.6f}-------MSE Loss = {(total_mse_loss / self.series_num).item():.6f} - Ridge Loss = {(ridge_loss_val / self.series_num).item():.6f}")
 
+                # 早停
                 if mean_loss < self.best_loss:
                     self.best_loss = mean_loss
                     self.best_it = ista_iter + 1
@@ -178,7 +159,7 @@ class TS_GC_Trainer:
         
         if self.best_model_state is not None:
             self.model.load_state_dict(self.best_model_state)
-        return self.train_losses
+        return self.best_loss
 
     def _compute_smooth_loss(self, x_data, y_data):
         predictions = self.model(x_data) # Shape: [num_samples, output_window, series_num]
@@ -195,7 +176,6 @@ class TS_GC_Trainer:
 
     def _compute_nonsmooth_loss(self):
         total_lasso_loss = 0
-        # self.first_layer_params_list contains the actual weight tensors
         for weight_tensor in self.first_layer_params_list:
             if weight_tensor is not None:
                  total_lasso_loss += lasso_penalty(weight_tensor, self.lasso_param, self.penalty_type)
@@ -232,41 +212,30 @@ class TS_GC_Trainer:
         plt.savefig(os.path.join(plots_dir, 'ista_training_loss.png'))
         plt.close()
 
-
 def main():
     run_id = datetime.now().strftime(r'%m-%d_%H-%M-%S')
     save_dir = Path('saved') / run_id
     setup_logging(save_dir)
     train_logger = get_logger() # 日志记录器
-    DATA_PATH = 'data/simu_data/series_data.csv' # 数据路径
-    INPUT_WINDOW = 5
-    OUTPUT_WINDOW = 1  
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    LR = 0.01      
-    LASSO_PARAM = 0.02  
-    RIDGE_PARAM = 0.01 
-    PENALTY_TYPE = 'H'  
-    FEATURE_DIM = 64
-    KERNEL_SIZE = 5    
-    DROPOUT = 0      
-    TEMPORAL_LAYERS = 2 
+
+    lr = 0.01      
+    lasso_param = 0.02  
+    ridge_param = 0.01 
+    penalty_type = 'H' 
+    feature_dim = 64
+    kernel_size = 5    
+    dropout = 0      
+    temporal_layers = 2 
     loss_function = nn.MSELoss(reduction='mean')
-
-    # 1. Load data
-    data_df = pd.read_csv(DATA_PATH)
-    SERIES_NUM = data_df.shape[1] # Infer from data
-    series_columns = data_df.columns.tolist()
-
-    X_full, Y_full = create_sequences(data_df, INPUT_WINDOW, OUTPUT_WINDOW, series_columns)
    
     model = MutiTS_GC(
         input_window=INPUT_WINDOW,
         output_window=OUTPUT_WINDOW,
         series_num=SERIES_NUM,
-        feature_dim=FEATURE_DIM,
-        temporal_layers=TEMPORAL_LAYERS,
-        kernel_size=KERNEL_SIZE,
-        dropout=DROPOUT,
+        feature_dim=feature_dim,
+        temporal_layers=temporal_layers,
+        kernel_size=kernel_size,
+        dropout=dropout,
         device=DEVICE
     ).to(DEVICE)
 
@@ -276,14 +245,14 @@ def main():
         epochs=20000, 
         save_dir=save_dir, 
         criterion=loss_function,
-        lr=LR, 
+        lr=lr, 
         device=DEVICE,
         series_num=SERIES_NUM,
-        X_full=X_full,
-        Y_full=Y_full,
-        penalty_type=PENALTY_TYPE, 
-        lasso_param=LASSO_PARAM,
-        ridge_param=RIDGE_PARAM,
+        X_full=X_DATA,
+        Y_full=Y_DATA,
+        penalty_type=penalty_type, 
+        lasso_param=lasso_param,
+        ridge_param=ridge_param,
         verbose=1
     )
     

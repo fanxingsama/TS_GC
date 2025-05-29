@@ -10,7 +10,6 @@ import torch.optim as optim
 import gc
 
 from model.MultiTCN import MultiTCN
-from model.TS_GC_temp import MutiTS_GC
 import matplotlib.pyplot as plt
 from config import *
 from logger.logger import get_logger, setup_logging
@@ -372,24 +371,24 @@ def main():
     train_loader, val_loader, test_loader = timeseriesDataLoader.split_sampler() # 得到训练集、验证集和测试集的数据加载器
 
     # 训练参数(TCN最优)
-    # lr = 0.0002
-    # lasso_param = 10
-    # ridge_param = 0.001
-    # penalty_type = 'GL'
+    lr = 0.0002
+    lasso_param = 10
+    ridge_param = 0.001
+    penalty_type = 'GL'
     
-    # tch_channels = 256
-    # kernel_size = 4
-    # droupout = 0
+    tch_channels = 256
+    kernel_size = 4
+    droupout = 0
     
-    # model = MultiTCN(
-    #     input_window=INPUT_WINDOW,
-    #     output_window=OUTPUT_WINDOW,
-    #     series_num=SERIES_NUM,
-    #     device=DEVICE,
-    #     tcn_channels=tch_channels,
-    #     kernel_size=kernel_size,
-    #     dropout=droupout
-    # ).to(DEVICE)
+    model = MultiTCN(
+        input_window=INPUT_WINDOW,
+        output_window=OUTPUT_WINDOW,
+        series_num=SERIES_NUM,
+        device=DEVICE,
+        tcn_channels=tch_channels,
+        kernel_size=kernel_size,
+        dropout=droupout
+    ).to(DEVICE)
     
     lr = 0.001
     lasso_param = 0.05
@@ -400,19 +399,7 @@ def main():
     feature_dim = 256
     kernel_size = 3 # 必须为奇数
     dropout = 0
-    temporal_layers = 2
-    
-    model = MutiTS_GC(
-        input_window=INPUT_WINDOW,
-        output_window=OUTPUT_WINDOW,
-        series_num=SERIES_NUM,
-        feature_dim=feature_dim,
-        other_feature=other_feature,
-        temporal_layers=temporal_layers,
-        kernel_size=kernel_size,
-        dropout=dropout
-    ).to(DEVICE)
-    
+
     causalFormerTrainer = MultiTCNTrainer(
         model=model, 
         epochs=EPOCHS, 

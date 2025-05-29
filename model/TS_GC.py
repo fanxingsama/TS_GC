@@ -58,9 +58,7 @@ class TS_GC(nn.Module):
             time_features = time_features + residual # time_features: [batch_size, feature_dim, input_window]
         
         space_features = self.spatial_processor(origin_features) # space_features: [batch_size, feature_dim, 1]
-        # 注意: space_features 的最后一个维度是1, 而 time_features 的最后一个维度是 input_window
-        # 为了相加，通常需要 space_features 扩展或者 time_features 被处理成类似维度
-        # 假设这里希望 space_features 广播到 time_features 的形状
+        # space_features 广播到 time_features 的形状
         combined_features = time_features + space_features # combined_features: [batch_size, feature_dim, input_window] (通过广播)
         
         # combined 的计算方式也依赖于上述的维度对齐

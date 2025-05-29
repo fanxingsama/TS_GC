@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+import torch
 
 
 def make_var_stationary(beta, radius=0.97):
@@ -43,3 +45,22 @@ def simulate_var(p, T, lag, sparsity=0.2, beta_value=1.0, sd=0.1, seed=0):
         X[:, t] += + errors[:, t-1]
 
     return X.T[burn_in:], beta, GC
+
+def create_data(data_path, input_window, output_window):
+    prediction_input_df = pd.read_csv(data_path)
+    all_series_cols = prediction_input_df.columns.tolist()
+    prediction_input_df = prediction_input_df.iloc[:, :len(all_series_cols)]
+
+    # 创建序列数据
+    
+    data_np = prediction_input_df[all_series_cols].values.astype(np.float32) 
+    num_timesteps, num_series = data_np.shape
+
+    X_list, Y_list = [], []
+    for i in range(num_timesteps - input_window - output_window + 1):
+        X_list.append(data_np[i : i + input_window, :])
+        Y_list.append(data_np[i + input_window : i + input_window + output_window, :])
+    
+    X_data = torch.tensor(np.array(X_list), dtype=torch.float32)
+    Y_data = torch.tensor(np.array(Y_list), dtype=torch.float32)
+    return X_data, Y_data, num_series
