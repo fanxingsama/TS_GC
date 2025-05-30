@@ -104,7 +104,7 @@ class TS_GC_Trainer:
 
     def train(self, save_model=False):
         for ista_iter in range(self.epochs):
-            current_smooth_loss, total_mse_loss = self._compute_smooth_loss(self.X_full, self.Y_full)
+            current_smooth_loss, total_mse_loss, ridge_loss_val = self._compute_smooth_loss(self.X_full, self.Y_full)
 
             # 2. Backward pass for the smooth part
             self.model.zero_grad()
@@ -126,7 +126,7 @@ class TS_GC_Trainer:
             if (ista_iter + 1) % self.check_every == 0:
                 with torch.no_grad(): # Ensure no gradients are computed for monitoring
                     # Re-calculate smooth loss with updated parameters
-                    eval_smooth_loss, total_mse_loss = self._compute_smooth_loss(self.X_full, self.Y_full)
+                    eval_smooth_loss, total_mse_loss, ridge_loss_val = self._compute_smooth_loss(self.X_full, self.Y_full)
                     eval_nonsmooth_loss = self._compute_nonsmooth_loss()
                     mean_loss = (eval_smooth_loss + eval_nonsmooth_loss) / self.series_num
                 
@@ -134,8 +134,15 @@ class TS_GC_Trainer:
                 
                 if self.verbose > 0:
                     print(f"{'='*10} ISTA Iter = {ista_iter + 1} {'='*10}")
-                    print(f"Smooth Loss = {mean_loss.item():.6f}-------MSE Loss = {(total_mse_loss / self.series_num).item():.6f} - noSmooth Loss = {(eval_nonsmooth_loss / self.series_num).item():.6f}")
+                    print(f"Smooth Loss = {mean_loss.item():.6f}-------MSE Loss = {(total_mse_loss / self.series_num).item():.6f} - ridge_loss = {(ridge_loss_val / self.series_num).item():.6f} - noSmooth Loss = {(eval_nonsmooth_loss / self.series_num).item():.6f}")
 
+                # 非平滑损失为 0 时，提前停止训练
+                if eval_nonsmooth_loss == 0:
+                    print("非平滑损失为 0，提前停止训练。")
+                    if self.best_model_state is not None:
+                        self.model.load_state_dict(self.best_model_state)
+                    return self.best_loss
+            
                 # 早停
                 if mean_loss < self.best_loss:
                     self.best_loss = mean_loss
@@ -154,8 +161,6 @@ class TS_GC_Trainer:
                         print("Stopping early")
                     if self.best_model_state is not None:
                         self.model.load_state_dict(self.best_model_state)
-                        if self.verbose > 0:
-                            print("Restored best model state for ISTA.")
                     return self.best_loss 
         
         if self.best_model_state is not None:
@@ -173,7 +178,7 @@ class TS_GC_Trainer:
             total_mse_loss += mse_i
         
         ridge_loss_val = self._ridge_regularize()
-        return total_mse_loss + ridge_loss_val, total_mse_loss
+        return total_mse_loss + ridge_loss_val, total_mse_loss, ridge_loss_val
 
     def _compute_nonsmooth_loss(self):
         total_lasso_loss = 0
@@ -219,15 +224,15 @@ def main():
     setup_logging(save_dir)
     train_logger = get_logger() # 日志记录器
 
-    lr = 0.024      
-    lasso_param = 0.005  
-    ridge_param = 0.01
+    lr = 0.01      
+    lasso_param = 0.02 
+    ridge_param = 0.001
     penalty_type = 'GSGL' 
-    feature_dim = 128
+    feature_dim = 64
     kernel_size = 5    
-    dropout = 0.2      
+    dropout = 0     
     temporal_layers = 2 
-    loss_function = nn.MSELoss(reduction='mean')
+    loss_function = nn.MSELoss()
    
     model = MutiTS_GC(
         input_window=INPUT_WINDOW,
@@ -274,8 +279,9 @@ def main():
     f"  - 损失函数: {loss_function}\n"
     f"  - 数据路径: {DATA_PATH}\n"
     f"  - 学习率: {lr}\n"
+    f"  - 正则化参数: {ridge_param}\n"
+    f"  - 惩罚类型: {penalty_type}\n"
     f"  - Lasso 参数: {lasso_param}\n"
-    f"  - 正则化类型: {ridge_param}\n"
     f"  - 序列数量: {SERIES_NUM}\n"
 )
 

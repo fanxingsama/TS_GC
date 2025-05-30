@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import pandas as pd
 from config import *
-
-from logger.logger import get_logger, setup_logging
 from model.TS_GC import MutiTS_GC
 
 rcParams['font.family'] = 'SimHei'
@@ -35,7 +33,7 @@ def load_model(model_path, device):
         device=device 
     ).to(device)
 
-    model.load_state_dict(torch.load(model_weight_path, map_location=device))
+    model.load_state_dict(torch.load(model_weight_path, map_location=device, weights_only=True))
     model.eval() 
     return model
 
@@ -306,6 +304,9 @@ def save_gc_matrix_to_csv(model, save_path, threshold=0.0, ignore_self_causality
     # 获取模型估计的GC权重范数矩阵
     GC_est_norms_tensor = model.GC(threshold=False, ignore_kernel=True) 
     GC_est_norms = GC_est_norms_tensor.detach().cpu().numpy()
+    if GC_est_norms.size == 0 | np.all(GC_est_norms == 0):
+        print("模型未估计出格兰杰因果关系，GC_est_norms为空或全为0。")
+        return False
     
     series_num = GC_est_norms.shape[0]
     
@@ -349,6 +350,7 @@ def save_gc_matrix_to_csv(model, save_path, threshold=0.0, ignore_self_causality
     df.to_csv(save_path, index=False, encoding='utf-8', header=False)
     
     print(f"格兰杰因果矩阵已保存至: {save_path}")
+    return True
 
 def main(model_path):
     gc_predict_path = model_path / "GC_matrix.csv"
@@ -356,17 +358,19 @@ def main(model_path):
     model = load_model(model_path, DEVICE)
     model.eval()
     
-    save_gc_matrix_to_csv(model, model_path / "GC_matrix.csv", threshold=0.0, ignore_self_causality=True, is_softmax=False)
-    plot_gc_compare(gc_predict_path, GC_PATH, SERIES_NUM, model_path / "GC_predict.png")
-    mae, mse = prediction_compare(model, X_DATA, Y_DATA, SERIES_NUM)
-    
-    accuracy, precision, recall, f1_score = model_eval(gc_predict_path, GC_PATH, SERIES_NUM)
+    res = save_gc_matrix_to_csv(model, model_path / "GC_matrix.csv", threshold=0.0, ignore_self_causality=True, is_softmax=False)
+    if res:
+        plot_gc_compare(gc_predict_path, GC_PATH, SERIES_NUM, model_path / "GC_predict.png")
+        mae, mse = prediction_compare(model, X_DATA, Y_DATA, SERIES_NUM)
+        accuracy, precision, recall, f1_score = model_eval(gc_predict_path, GC_PATH, SERIES_NUM)
+        plot_first_layer_weights_heatmap(model, 1, save_path=model_path / "first_layer_weights_heatmap.png", use_abs_weights=True)
     log_file_path = model_path / "model_test_info.log"
     with open(log_file_path, 'w', encoding='utf-8') as log_file:
         log_file.write(f"模型评估结果:  准确率: {accuracy:.2f}, 精确率: {precision:.2f}, 召回率: {recall:.2f}, F1分数: {f1_score:.2f}\n, MAE: {mae:.2f}, MSE: {mse:.2f}\n")
-    plot_first_layer_weights_heatmap(model, 1, save_path=model_path / "first_layer_weights_heatmap.png", use_abs_weights=True)
+        
 
 if __name__ == "__main__":
     run_id = get_latest_run_id()
+    # run_id = '05-30_16-30-24'
     model_path = Path('saved') / run_id
     main(model_path)

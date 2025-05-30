@@ -17,7 +17,7 @@ class TS_GC(nn.Module):
                     nn.Conv1d(feature_dim, feature_dim, kernel_size, 
                              padding=(kernel_size-1)*dilation//2, dilation=dilation),
                     nn.BatchNorm1d(feature_dim),
-                    nn.ReLU(),
+                    nn.PReLU(),
                     nn.Dropout(dropout)
                 )
             )
@@ -26,7 +26,7 @@ class TS_GC(nn.Module):
                 nn.AdaptiveAvgPool1d(1), # 输出: [batch_size, feature_dim, 1]
                 nn.Flatten(), # 输出: [batch_size, feature_dim]
                 nn.Linear(feature_dim, feature_dim), # 输出: [batch_size, feature_dim]
-                nn.ReLU(),
+                nn.PReLU(),
                 nn.Dropout(dropout),
                 nn.Unflatten(1, (feature_dim, 1)) # 输出: [batch_size, feature_dim, 1]
             )
@@ -35,13 +35,13 @@ class TS_GC(nn.Module):
             nn.AdaptiveAvgPool1d(1), # 输出: [batch_size, feature_dim, 1] (假设输入是 [batch_size, feature_dim, seq_len])
             nn.Flatten(), # 输出: [batch_size, feature_dim]
             nn.Linear(feature_dim, feature_dim), # 输出: [batch_size, feature_dim]
-            nn.ReLU(),
+            nn.PReLU(),
             nn.Dropout(dropout)
         )
         
         self.prediction_head = nn.Sequential(
             nn.Linear(feature_dim, feature_dim // 2), # 输出: [batch_size, feature_dim // 2]
-            nn.ReLU(),
+            nn.PReLU(),
             nn.Dropout(dropout),
             nn.Linear(feature_dim // 2, output_window) # 输出: [batch_size, output_window]
         )
@@ -135,7 +135,7 @@ class MutiTS_GC(nn.Module):
             GC_val = [torch.norm(net.get_first_conv_weights(), dim=(0, 2))
                       for net in self.networks]
         else:
-            GC_val = [torch.norm(net.get_first_conv_weights(), dim=0)
+            GC_val = [torch.norm(net.get_first_conv_weights(), p = 1,dim=0)
                       for net in self.networks]
         GC_val = torch.stack(GC_val) 
         if threshold:
