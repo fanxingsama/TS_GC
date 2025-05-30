@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 import joblib
+from scipy.special import softmax
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -301,12 +302,28 @@ def get_latest_run_id():
     return max(timestamps) if timestamps else None
 
 # 将模型的格兰杰因果矩阵保存为CSV格式
-def save_gc_matrix_to_csv(model, save_path, threshold=0.0, ignore_self_causality=True):
+def save_gc_matrix_to_csv(model, save_path, threshold=0.0, ignore_self_causality=True, is_softmax = True):
     # 获取模型估计的GC权重范数矩阵
     GC_est_norms_tensor = model.GC(threshold=False, ignore_kernel=True) 
     GC_est_norms = GC_est_norms_tensor.detach().cpu().numpy()
     
     series_num = GC_est_norms.shape[0]
+    
+    if is_softmax: # 是否应用softmax
+        if ignore_self_causality:
+            # 将对角线元素设为极小值，避免影响softmax计算
+            GC_est_norms_masked = GC_est_norms.copy()
+            np.fill_diagonal(GC_est_norms_masked, -np.inf)
+            
+            # 按行应用softmax
+            GC_est_norms_softmax = softmax(GC_est_norms_masked, axis=1)
+            
+            # 将对角线元素重新设为0
+            np.fill_diagonal(GC_est_norms_softmax, 0)
+        else:
+            GC_est_norms_softmax = softmax(GC_est_norms, axis=1)
+        
+        GC_est_norms = GC_est_norms_softmax
     
     # 创建结果列表
     results = []
@@ -339,14 +356,14 @@ def main(model_path):
     model = load_model(model_path, DEVICE)
     model.eval()
     
-    save_gc_matrix_to_csv(model, model_path / "GC_matrix.csv", threshold=0.0)
+    save_gc_matrix_to_csv(model, model_path / "GC_matrix.csv", threshold=0.0, ignore_self_causality=True, is_softmax=False)
     plot_gc_compare(gc_predict_path, GC_PATH, SERIES_NUM, model_path / "GC_predict.png")
     mae, mse = prediction_compare(model, X_DATA, Y_DATA, SERIES_NUM)
     
     accuracy, precision, recall, f1_score = model_eval(gc_predict_path, GC_PATH, SERIES_NUM)
     log_file_path = model_path / "model_test_info.log"
     with open(log_file_path, 'w', encoding='utf-8') as log_file:
-        log_file.write(f"模型评估结果:\n 准确率: {accuracy:.2f}, 精确率: {precision:.2f}, 召回率: {recall:.2f}, F1分数: {f1_score:.2f}\n MAE: {mae:.2f}, MSE: {mse:.2f}\n")
+        log_file.write(f"模型评估结果:  准确率: {accuracy:.2f}, 精确率: {precision:.2f}, 召回率: {recall:.2f}, F1分数: {f1_score:.2f}\n, MAE: {mae:.2f}, MSE: {mse:.2f}\n")
     plot_first_layer_weights_heatmap(model, 1, save_path=model_path / "first_layer_weights_heatmap.png", use_abs_weights=True)
 
 if __name__ == "__main__":

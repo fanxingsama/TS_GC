@@ -18,7 +18,7 @@ from config import *
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
-N_TRIALS = 50 # Optuna 的试验次数
+N_TRIALS = 20 # Optuna 的试验次数
 STUDY_NAME = "optuna"
 STORAGE_PATH = f"sqlite:///{STUDY_NAME}.db"
 
@@ -72,6 +72,7 @@ def objective(trial, logger, save_dir):
         series_num=SERIES_NUM,
         X_full=X_DATA,
         Y_full=Y_DATA,
+        logger=logger,
         penalty_type=penalty_type, 
         lasso_param=lasso_param,
         ridge_param=ridge_param,

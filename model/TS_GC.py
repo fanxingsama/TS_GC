@@ -62,7 +62,7 @@ class TS_GC(nn.Module):
         combined_features = time_features + space_features # combined_features: [batch_size, feature_dim, input_window] (通过广播)
         
         # combined 的计算方式也依赖于上述的维度对齐
-        combined = 0.8 * origin_features + 0.2 * combined_features # combined: [batch_size, feature_dim, input_window]
+        combined = 0.9 * origin_features + 0.1 * combined_features # combined: [batch_size, feature_dim, input_window]
         
         fused_features = self.feature_fusion(combined) # fused_features: [batch_size, feature_dim]
         prediction = self.prediction_head(fused_features) # prediction: [batch_size, output_window]

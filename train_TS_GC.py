@@ -96,7 +96,7 @@ class TS_GC_Trainer:
         for name, param in self.model.named_parameters():
             is_first_layer_weight = False
             for fl_param in self.first_layer_params_list:
-                if param is fl_param: # Check for object identity
+                if param is fl_param:
                     is_first_layer_weight = True
                     break
             if not is_first_layer_weight:
@@ -142,6 +142,7 @@ class TS_GC_Trainer:
                     self.best_it = ista_iter + 1
                     self.best_model_state = deepcopy(self.model.state_dict())
                     if save_model:
+                        self.logger.info(f"最优轮数： {self.best_it} ----------最优loss： {self.best_loss:.6f}")
                         os.makedirs(self.save_dir, exist_ok=True)
                         torch.save(self.best_model_state, 
                                    os.path.join(self.save_dir, "best_model.pth"))
@@ -218,13 +219,13 @@ def main():
     setup_logging(save_dir)
     train_logger = get_logger() # 日志记录器
 
-    lr = 0.01      
-    lasso_param = 0.02  
-    ridge_param = 0.01 
-    penalty_type = 'H' 
-    feature_dim = 64
+    lr = 0.024      
+    lasso_param = 0.005  
+    ridge_param = 0.01
+    penalty_type = 'GSGL' 
+    feature_dim = 128
     kernel_size = 5    
-    dropout = 0      
+    dropout = 0.2      
     temporal_layers = 2 
     loss_function = nn.MSELoss(reduction='mean')
    
@@ -242,7 +243,7 @@ def main():
     # 5. Initialize trainer
     trainer = TS_GC_Trainer(
         model=model, 
-        epochs=20000, 
+        epochs=EPOCHS, 
         save_dir=save_dir, 
         criterion=loss_function,
         lr=lr, 
@@ -250,6 +251,7 @@ def main():
         series_num=SERIES_NUM,
         X_full=X_DATA,
         Y_full=Y_DATA,
+        logger=train_logger,
         penalty_type=penalty_type, 
         lasso_param=lasso_param,
         ridge_param=ridge_param,
