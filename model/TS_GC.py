@@ -4,6 +4,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+class Permute(nn.Module):
+    def __init__(self, *dims):
+        super().__init__()
+        self.dims = dims
+        
+    def forward(self, x):
+        return x.permute(*self.dims)
+
+class SelectLastTimeStep(nn.Module):
+    def forward(self, x):
+        # x: [batch_size, feature_dim, seq_len]
+        return x[:, :, -1] # [batch_size, feature_dim]
+
 class TS_GC(nn.Module):
     def __init__(self, series_num, feature_dim, temporal_layers, kernel_size, dropout, output_window):
         super(TS_GC, self).__init__()
@@ -62,7 +75,7 @@ class TS_GC(nn.Module):
         combined_features = time_features + space_features # combined_features: [batch_size, feature_dim, input_window] (通过广播)
         
         # combined 的计算方式也依赖于上述的维度对齐
-        combined = 0.9 * origin_features + 0.1 * combined_features # combined: [batch_size, feature_dim, input_window]
+        combined = 0.5 * origin_features + 0.5 * combined_features # combined: [batch_size, feature_dim, input_window]
         
         fused_features = self.feature_fusion(combined) # fused_features: [batch_size, feature_dim]
         prediction = self.prediction_head(fused_features) # prediction: [batch_size, output_window]
@@ -78,7 +91,7 @@ class MutiTS_GC(nn.Module):
         super(MutiTS_GC, self).__init__()
         self.input_window = input_window
         self.output_window = output_window
-        self.series_num = series_num
+        self.series_num = series_num 
         self.feature_dim = feature_dim
         self.device = device
         
@@ -96,7 +109,7 @@ class MutiTS_GC(nn.Module):
         for i in range(self.series_num):
             self.networks.append(
                 TS_GC(
-                    series_num=self.series_num, # 每个TS_GC都接收全部series_num个序列作为输入通道
+                    series_num=self.series_num,
                     feature_dim=feature_dim,
                     temporal_layers=temporal_layers,
                     kernel_size=kernel_size,
@@ -106,15 +119,18 @@ class MutiTS_GC(nn.Module):
             )
 
     def forward(self, x):
-        # x: [batch_size, input_window, series_num] (原始输入格式)
+        # x: [batch_size, input_window, series_num] 
         x_input = x.permute(0, 2, 1) # x_input: [batch_size, series_num, input_window] (调整以匹配Conv1d的channels_in)
         
         all_predictions = []
         for i in range(self.series_num):
-            # self.networks[i] 是一个 TS_GC 实例
-            # 它接收的 x_input 是 [batch_size, series_num, input_window]
-            # TS_GC.forward 的输出是 [batch_size, output_window]
-            prediction = self.networks[i](x_input) # prediction for series i: [batch_size, output_window]
+            channel_mask = torch.ones(self.series_num, dtype=torch.bool, device=x.device)
+            channel_mask[i] = False
+            
+            input_for_network_i = x_input[:, channel_mask, :] # 遮蔽掉目标序列的值
+            
+            # prediction = self.networks[i](input_for_network_i) # prediction : [batch_size, output_window]
+            prediction = self.networks[i](x_input) # prediction : [batch_size, output_window]
             all_predictions.append(prediction)
         
         # all_predictions 是一个长度为 series_num 的列表

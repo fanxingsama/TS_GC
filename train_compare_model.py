@@ -14,7 +14,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from logger.logger import get_logger, setup_logging
-from model.TS_GC import MutiTS_GC
+from compare_model import cmlp
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -58,7 +58,7 @@ def lasso_penalty(network, lam, penalty):
         raise ValueError('unsupported penalty: %s' % penalty)
 
 
-class TS_GC_Trainer:
+class Comper_model_Trainer:
     def __init__(self, model, epochs, save_dir, criterion, lr, device, series_num,
                  X_full, Y_full, penalty_type, lasso_param, ridge_param, 
                  check_every=10, lookback=5, logger=None, verbose=1):
@@ -87,6 +87,20 @@ class TS_GC_Trainer:
         self.best_model_state = None
 
         self.first_layer_params_list = self.model.get_first_layer_weights() # List of weight tensors
+
+        other_params_names = set()
+        for i in range(self.series_num):
+            other_params_names.add(f"networks.{i}.first_conv.weight")
+
+        self.other_params_for_ridge = []
+        for name, param in self.model.named_parameters():
+            is_first_layer_weight = False
+            for fl_param in self.first_layer_params_list:
+                if param is fl_param:
+                    is_first_layer_weight = True
+                    break
+            if not is_first_layer_weight:
+                 self.other_params_for_ridge.append(param)
 
     def train(self, save_model=False):
         for ista_iter in range(self.epochs):
@@ -136,6 +150,7 @@ class TS_GC_Trainer:
                     self.best_model_state = deepcopy(self.model.state_dict())
                     if save_model:
                         self.logger.info(f"最优轮数： {self.best_it} ----------最优loss： {self.best_loss:.6f}")
+                        os.makedirs(self.save_dir, exist_ok=True)
                         torch.save(self.best_model_state, 
                                    os.path.join(self.save_dir, "best_model.pth"))
                         if hasattr(self.model, 'config'):
@@ -159,10 +174,11 @@ class TS_GC_Trainer:
         for i in range(self.series_num):
             pred_for_series_i = predictions[:, :, i] # Shape: [num_samples, output_window]
             target_for_series_i = y_data[:, :, i]    # Shape: [num_samples, output_window]
-            total_mse_loss += self.criterion(pred_for_series_i, target_for_series_i)
+            mse_i = self.criterion(pred_for_series_i, target_for_series_i)
+            total_mse_loss += mse_i
         
-        smooth_loss = total_mse_loss + self._ridge_regularize()
-        return smooth_loss, total_mse_loss, self._ridge_regularize()
+        ridge_loss_val = self._ridge_regularize()
+        return total_mse_loss + ridge_loss_val, total_mse_loss, ridge_loss_val
 
     def _compute_nonsmooth_loss(self):
         total_lasso_loss = 0
@@ -174,7 +190,7 @@ class TS_GC_Trainer:
     def _ridge_regularize(self):
         ridge_loss = torch.tensor(0.0, device=self.device) # Initialize on correct device
         if self.ridge_param > 0:
-            for param in self.model.parameters():
+            for param in self.other_params_for_ridge:
                 if param.requires_grad: # Only regularize parameters that are learnable
                     ridge_loss += torch.sum(param ** 2)
         return self.ridge_param * ridge_loss
@@ -230,7 +246,7 @@ def main():
     ).to(DEVICE)
 
     # 5. Initialize trainer
-    trainer = TS_GC_Trainer(
+    trainer = Comper_model_Trainer(
         model=model, 
         epochs=EPOCHS, 
         save_dir=save_dir, 

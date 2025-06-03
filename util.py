@@ -48,12 +48,10 @@ def simulate_var(p, T, lag, sparsity=0.2, beta_value=1.0, sd=0.1, seed=0):
 
 def create_data(data_path, input_window, output_window):
     prediction_input_df = pd.read_csv(data_path)
-    all_series_cols = prediction_input_df.columns.tolist()
-    prediction_input_df = prediction_input_df.iloc[:, :len(all_series_cols)]
-
-    # 创建序列数据
+    series_names = prediction_input_df.columns.tolist() # 表头已经在这里
+    # prediction_input_df = prediction_input_df.iloc[:, :len(all_series_cols)] # 这行其实可以省略，因为all_series_cols就是所有列
     
-    data_np = prediction_input_df[all_series_cols].values.astype(np.float32) 
+    data_np = prediction_input_df[series_names].values.astype(np.float32) 
     num_timesteps, num_series = data_np.shape
 
     X_list, Y_list = [], []
@@ -63,4 +61,5 @@ def create_data(data_path, input_window, output_window):
     
     X_data = torch.tensor(np.array(X_list), dtype=torch.float32)
     Y_data = torch.tensor(np.array(Y_list), dtype=torch.float32)
-    return X_data, Y_data, num_series
+    
+    return X_data, Y_data, num_series, series_names
