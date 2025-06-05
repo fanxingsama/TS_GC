@@ -185,13 +185,12 @@ class TS_GC_Trainer:
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-  
+            
     def plot_training_curves(self):
         plots_dir = os.path.join(self.save_dir, "training_curves_ista")
         os.makedirs(plots_dir, exist_ok=True)
         
         plt.figure(figsize=(10, 6))
-        # X-axis for plot should be based on check_every
         iterations_plotted = [i * self.check_every for i in range(len(self.train_losses))]
         plt.plot(iterations_plotted, self.train_losses, label='Train Loss (ISTA)')
         plt.title('Training Loss (ISTA)')

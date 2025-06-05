@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
 import torch
 
 
@@ -53,6 +54,9 @@ def create_data(data_path, input_window, output_window):
     
     data_np = prediction_input_df[series_names].values.astype(np.float32) 
     num_timesteps, num_series = data_np.shape
+    
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    data_np = scaler.fit_transform(data_np)
 
     X_list, Y_list = [], []
     for i in range(num_timesteps - input_window - output_window + 1):

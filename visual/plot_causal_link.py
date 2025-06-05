@@ -36,7 +36,7 @@ def save_causal_links(csv_path, img_save_path=None):
         pos[node] = (np.cos(angle), np.sin(angle))
 
     # 设置图形大小和样式
-    plt.figure(figsize=(4, 4))
+    plt.figure(figsize=(8, 8))
     ax = plt.gca()
     ax.set_aspect('equal')
 
@@ -80,7 +80,7 @@ def save_causal_links(csv_path, img_save_path=None):
 
     # 绘制节点
     node_colors = '#4285f4'  # 蓝色
-    node_size = 350
+    node_size = 400
 
     nx.draw_networkx_nodes(G, pos, 
                         node_color=node_colors,

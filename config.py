@@ -6,8 +6,8 @@ from util import *
 DATA_PATH = 'data\\simu_data\\series_data.csv'
 GC_PATH = 'data\\simu_data\\granger_causality.csv'
 
-# DATA_PATH = 'data\\fMRI\\timeseries9.csv'
-# GC_PATH = 'data\\fMRI\\sim9_gt_processed.csv'
+# DATA_PATH = 'data/data_1.csv'
+# GC_PATH = None
 
 # 训练参数
 INPUT_WINDOW = 5

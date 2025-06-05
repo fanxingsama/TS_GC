@@ -124,10 +124,10 @@ class MutiTS_GC(nn.Module):
         
         all_predictions = []
         for i in range(self.series_num):
-            channel_mask = torch.ones(self.series_num, dtype=torch.bool, device=x.device)
-            channel_mask[i] = False
+            # channel_mask = torch.ones(self.series_num, dtype=torch.bool, device=x.device)
+            # channel_mask[i] = False
             
-            input_for_network_i = x_input[:, channel_mask, :] # 遮蔽掉目标序列的值
+            # input_for_network_i = x_input[:, channel_mask, :] # 遮蔽掉目标序列的值
             
             # prediction = self.networks[i](input_for_network_i) # prediction : [batch_size, output_window]
             prediction = self.networks[i](x_input) # prediction : [batch_size, output_window]
