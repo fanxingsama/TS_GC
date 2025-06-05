@@ -9,7 +9,7 @@ from matplotlib import rcParams
 import pandas as pd
 from config import *
 from model.TS_GC import MutiTS_GC
-from visual.plot_causal_link import plot_causal_graph_from_csv
+from visual.plot_causal_link import save_causal_links
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -578,7 +578,7 @@ def main(model_path):
         mae, mse = prediction_compare(model, X_DATA, Y_DATA, model.series_num)
         accuracy, precision, recall, f1_score = model_eval(gc_predict_path, GC_PATH, model.series_num)
         plot_first_layer_weights_heatmap(model, 1, save_path=model_path / "first_layer_weights_heatmap.png", use_abs_weights=True)
-        plot_causal_graph_from_csv(csv_path_or_data = gc_constrain_path, series_names = SERIES_NAME, output_image_path = causal_links_path,
+        save_causal_links(csv_path = gc_constrain_path, img_save_path = causal_links_path,
     )
     log_file_path = model_path / "model_test_info.log"
     with open(log_file_path, 'w', encoding='utf-8') as log_file:
