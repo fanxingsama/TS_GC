@@ -22,6 +22,7 @@ class TS_GC(nn.Module):
         super(TS_GC, self).__init__()
         self.first_conv = nn.Conv1d(series_num, feature_dim, kernel_size, padding=kernel_size//2)
         
+        # 时间层
         self.temporal_layers = nn.ModuleList()
         for i in range(temporal_layers):
             dilation = 2 ** i
@@ -35,6 +36,7 @@ class TS_GC(nn.Module):
                 )
             )
         
+        # 空间层
         self.spatial_processor = nn.Sequential(
                 nn.AdaptiveAvgPool1d(1), # 输出: [batch_size, feature_dim, 1]
                 nn.Flatten(), # 输出: [batch_size, feature_dim]

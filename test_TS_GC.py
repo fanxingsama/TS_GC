@@ -498,6 +498,52 @@ def constrain_gc_matrix_with_mad(gc_csv_path, output_csv_path, series_num, mad_m
     
     return len(constrained_results)
 
+def constrain_with_std_dev(gc_csv_path, output_csv_path, series_num, std_multiplier=1.5):
+    gc_df = pd.read_csv(gc_csv_path, header=None)
+    GC_weights = np.zeros((series_num, series_num))
+    for _, row in gc_df.iterrows():
+        GC_weights[int(row.iloc[1]), int(row.iloc[0])] = float(row.iloc[2])
+
+    constrained_results = []
+    for target_idx in range(series_num):
+        # 获取当前目标序列的所有非零输入权重（排除自身）
+        target_weights = []
+        source_indices = []
+        for source_idx in range(series_num):
+            if source_idx != target_idx and GC_weights[target_idx, source_idx] > 0:
+                target_weights.append(GC_weights[target_idx, source_idx])
+                source_indices.append(source_idx)
+        
+        if not target_weights:
+            continue
+
+        weights_arr = np.array(target_weights)
+        mean_weight = np.mean(weights_arr)
+        std_weight = np.std(weights_arr)
+        
+        # 计算阈值
+        threshold = mean_weight + std_multiplier * std_weight
+        print(f"目标序列 {target_idx}: 均值={mean_weight:.4f}, 标准差={std_weight:.4f}, 阈值={threshold:.4f}")
+
+        # 筛选
+        for i, weight in enumerate(target_weights):
+            if weight >= threshold:
+                constrained_results.append({
+                    'source': source_indices[i],
+                    'target': target_idx,
+                    'strength': weight
+                })
+
+    if constrained_results:
+        constrained_df = pd.DataFrame(constrained_results)
+        constrained_df = constrained_df.sort_values(['source', 'target'])
+        constrained_df.to_csv(output_csv_path, index=False, header=False)
+        print(f"均值标准差 (multiplier={std_multiplier}) 约束后的GC矩阵已保存至: {output_csv_path}")
+    else:
+        pd.DataFrame(columns=['source', 'target', 'strength']).to_csv(
+            output_csv_path, index=False, header=False)
+        print("均值标准差约束后无满足条件的因果关系，已创建空文件。")
+
 def main(model_path):
     gc_predict_path = model_path / "GC_matrix.csv"
     gc_constrain_path = model_path / "GC_matrix_constrained.csv"
@@ -510,20 +556,18 @@ def main(model_path):
     res = save_gc_matrix_to_csv(model, gc_predict_path, threshold=0.0, ignore_self_causality=True, is_softmax=False)
     
     if res:
-        constrain_gc_matrix_with_mad(gc_predict_path, gc_constrain_path, model.series_num, mad_multiplier=1.0)
+        # constrain_gc_matrix_with_mad(gc_predict_path, gc_constrain_path, model.series_num, mad_multiplier=1.0)
+        constrain_with_std_dev(gc_predict_path, gc_constrain_path, model.series_num, std_multiplier=0.3)
         plot_gc_triple_compare(gc_predict_path,gc_constrain_path,  model.series_num, GC_predict, true_csv_path=GC_PATH, show_weights=True)
         mae, mse = prediction_compare(model, X_DATA, Y_DATA, model.series_num, save_path=model_path, series_name=SERIES_NAME)
         # accuracy, precision, recall, f1_score = model_eval(gc_predict_path, GC_PATH, model.series_num)
         plot_first_layer_weights_heatmap(model, 1, save_path=model_path / "first_layer_weights_heatmap.png", use_abs_weights=True)
-        save_causal_links(csv_path = gc_constrain_path, img_save_path = causal_links_path,
-    )
-    # log_file_path = model_path / "model_test_info.log"
-    # with open(log_file_path, 'w', encoding='utf-8') as log_file:
-    #     log_file.write(f"模型评估结果:  准确率: {accuracy:.2f}, 精确率: {precision:.2f}, 召回率: {recall:.2f}, F1分数: {f1_score:.2f}\n, MAE: {mae:.2f}, MSE: {mse:.2f}\n")
+        save_causal_links(csv_path = gc_constrain_path, img_save_path = causal_links_path)
+        
         
 
 if __name__ == "__main__":
-    run_id = get_latest_run_id()
-    # run_id = '05-30_16-30-55'
+    # run_id = get_latest_run_id()
+    run_id = '12-16_16-43-16'
     model_path = Path('saved') / run_id
     main(model_path)
