@@ -86,13 +86,6 @@ class TS_GC_Trainer:
         self.best_loss = float('inf')
         self.best_it = None
         self.best_model_state = None
-        
-        # 准备双显卡
-        # if isinstance(self.model, nn.DataParallel):
-        #     self.model_core = self.model.module
-        # else:
-        #     self.model_core = self.model
-        self.model_core = self.model
 
         self.first_layer_params_list = self.model.get_first_layer_weights() # List of weight tensors
 

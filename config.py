@@ -20,4 +20,3 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 X_DATA, Y_DATA, SERIES_NUM, SERIES_NAME = create_data(DATA_PATH, INPUT_WINDOW, OUTPUT_WINDOW)
-
