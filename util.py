@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 import torch
-
+import re
+from pathlib import Path
 
 def make_var_stationary(beta, radius=0.97):
     '''Rescale coefficients of VAR model to make stable.'''
@@ -67,3 +68,15 @@ def create_data(data_path, input_window, output_window):
     Y_data = torch.tensor(np.array(Y_list), dtype=torch.float32)
     
     return X_data, Y_data, num_series, series_names
+
+def get_latest_run_id():
+    base_path = Path('saved')
+    if not base_path.exists():
+        return None
+    
+    # 获取所有符合格式的目录名
+    pattern = re.compile(r'^\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
+    timestamps = [d.name for d in base_path.iterdir() 
+                 if d.is_dir() and pattern.match(d.name)]
+    
+    return max(timestamps) if timestamps else None

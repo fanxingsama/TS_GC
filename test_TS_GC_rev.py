@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import joblib
 from scipy.special import softmax
 import torch
@@ -10,17 +11,16 @@ from config import *
 from model.TS_GC import MutiTS_GC
 import os
 from visual.plot_causal_link import save_causal_links
-from util import get_latest_run_id
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# 加载模型
 def load_model(model_path, device):
     config_path = model_path / "model_config.pkl"
-    model_weight_path = model_path / "best_model.pth"
+    # [修改点 1]：文件名变更，现在加载的是原始方向的最优模型
+    model_weight_path = model_path / "best_model_origin.pth" 
 
     saved_config = joblib.load(config_path)
     
@@ -35,12 +35,72 @@ def load_model(model_path, device):
         device=device 
     ).to(device)
 
+    # 检查文件是否存在，防止报错
+    if not model_weight_path.exists():
+        print(f"警告: 未找到 {model_weight_path}，尝试加载旧版 best_model.pth")
+        model_weight_path = model_path / "best_model.pth"
+
     model.load_state_dict(torch.load(model_weight_path, map_location=device, weights_only=True))
     model.eval() 
     return model
 
-# 绘制时序序列预测结果与实际值的对比图
+# 混淆矩阵 (保持不变)
+def model_eval(pred_csv_path, true_csv_path, series_num):
+    # ... (代码与原版相同，省略以节省空间) ...
+    GC_true = np.zeros((series_num, series_num), dtype=int)
+    true_df = pd.read_csv(true_csv_path, header=None)
+    for _, row in true_df.iterrows():
+        cause = int(row.iloc[0])
+        effect = int(row.iloc[1])
+        if 0 <= cause < series_num and 0 <= effect < series_num:
+            GC_true[effect, cause] = 1
+
+    GC_pred = np.zeros((series_num, series_num), dtype=int)
+    pred_df = pd.read_csv(pred_csv_path, header=None)
+    for _, row in pred_df.iterrows():
+        cause = int(row.iloc[0])
+        effect = int(row.iloc[1])
+        if 0 <= cause < series_num and 0 <= effect < series_num:
+            GC_pred[effect, cause] = 1
+
+    TP = 0
+    TN = 0
+    FP = 0
+    FN = 0
+
+    for i in range(series_num):
+        for j in range(series_num):
+            true_val = GC_true[i, j]
+            pred_val = GC_pred[i, j]
+
+            if true_val == 1 and pred_val == 1:
+                TP += 1
+            elif true_val == 0 and pred_val == 0:
+                TN += 1
+            elif true_val == 0 and pred_val == 1:
+                FP += 1
+            elif true_val == 1 and pred_val == 0:
+                FN += 1
+    accuracy = 0.0
+    precision = 0.0
+    recall = 0.0
+    f1_score = 0.0
+
+    total_samples = TP + TN + FP + FN
+    accuracy = (TP + TN) / total_samples
+    if TP + FP > 0:
+        precision = TP / (TP + FP)
+    if TP + FN > 0:
+        recall = TP / (TP + FN)
+    if precision + recall > 0:
+        f1_score = 2 * (precision * recall) / (precision + recall)
+    
+    return accuracy, precision, recall, f1_score
+
+
+# 绘制预测结果与实际值的对比图 (保持不变)
 def prediction_compare(model, X_data, Y_data, series_num, save_path=None, series_name=None, points_to_plot=300, max_samples=300):
+    # ... (代码与原版相同，省略以节省空间) ...
     num_samples_to_process = min(X_data.shape[0], max_samples)
 
     X_data_subset = X_data[:num_samples_to_process].to(DEVICE)
@@ -101,8 +161,10 @@ def prediction_compare(model, X_data, Y_data, series_num, save_path=None, series
     
     return mae, mse
 
-# 计算每个目标序列的主导因果滞后热力图
+
+# 热力图 (保持不变)
 def plot_first_layer_weights_heatmap(model, target_series_idx, save_path=None, use_abs_weights=True):
+    # ... (代码与原版相同，省略以节省空间) ...
     if not (0 <= target_series_idx < model.series_num):
         print(f"错误: target_series_idx ({target_series_idx}) 超出范围 [0, {model.series_num-1}]")
         return
@@ -169,8 +231,9 @@ def plot_first_layer_weights_heatmap(model, target_series_idx, save_path=None, u
         plt.show() # 如果没有提供保存路径，则显示图像
     plt.close()
 
-# 绘制三个格兰杰因果图的对比：真实、预测、约束后
+# 绘制三个格兰杰因果图的对比 (保持不变)
 def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_num, save_path, true_csv_path=None, show_weights=True):
+    # ... (代码与原版相同，省略以节省空间) ...
     """
     Args:
         pred_csv_path: 原始预测的GC矩阵CSV路径
@@ -320,63 +383,60 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_num, save
     plt.close()
     print(f"格兰杰因果矩阵对比图已保存至: {save_path}")
 
-# 将模型的格兰杰因果矩阵保存为CSV格式
-def save_gc_matrix_to_csv(model, save_path, threshold=0.0, ignore_self_causality=True, is_softmax = True):
-    # 获取模型估计的GC权重范数矩阵
-    GC_est_norms_tensor = model.GC(threshold=False, ignore_kernel=True) 
-    GC_est_norms = GC_est_norms_tensor.detach().cpu().numpy()
-    if GC_est_norms.size == 0 or np.all(GC_est_norms == 0):
-        print("模型未估计出格兰杰因果关系，GC_est_norms为空或全为0。")
+# [修改点 2]: 新增函数，用于将训练生成的融合TXT文件转换为测试用的CSV格式
+def convert_fused_txt_to_csv(txt_path, csv_path, threshold=0.0, ignore_self_causality=True, is_softmax=True):
+    """
+    读取训练生成的融合GC矩阵(final_fused_gc.txt)，转换为绘图所需的CSV格式
+    """
+    if not txt_path.exists():
+        print(f"错误: 找不到融合后的GC矩阵文件: {txt_path}")
         return False
     
+    # 加载矩阵 [P, P]
+    GC_est_norms = np.loadtxt(txt_path)
     series_num = GC_est_norms.shape[0]
     
-    if is_softmax: # 是否应用softmax
+    if is_softmax:
         if ignore_self_causality:
-            # 将对角线元素设为极小值，避免影响softmax计算
             GC_est_norms_masked = GC_est_norms.copy()
+            # 将对角线元素设为极小值，避免影响softmax
             np.fill_diagonal(GC_est_norms_masked, -np.inf)
-            
-            # 按行应用softmax
             GC_est_norms_softmax = softmax(GC_est_norms_masked, axis=1)
-            
-            # 将对角线元素重新设为0
+            # 对角线置零
             np.fill_diagonal(GC_est_norms_softmax, 0)
         else:
             GC_est_norms_softmax = softmax(GC_est_norms, axis=1)
         
         GC_est_norms = GC_est_norms_softmax
     
-    # 创建结果列表
     results = []
-    
-    for i in range(series_num):  # i是受影响的序列（果）
-        for j in range(series_num):  # j是原因序列（因）
-            # 如果屏蔽自因果关系且i==j，则跳过
+    for i in range(series_num): # i 是 target (果)
+        for j in range(series_num): # j 是 source (因)
             if ignore_self_causality and i == j:
                 continue
-                
-            weight = round(GC_est_norms[i, j], 3) # 保留三位小数
-            # 只保存权重大于阈值的因果关系
+            
+            weight = GC_est_norms[i, j]
             if weight > threshold:
                 results.append({
                     'source': j,
-                    'target': i, 
-                    'strength': weight
+                    'target': i,
+                    'strength': round(weight, 4)
                 })
     
     # 转换为DataFrame并保存
     df = pd.DataFrame(results)
-    
-    df = df.sort_values(['source', 'target'], ascending=[True, True])  # 先按因升序，再按果降序
-    df.to_csv(save_path, index=False, encoding='utf-8', header=False)
-    
-    print(f"格兰杰因果矩阵已保存至: {save_path}")
-    return True
+    if not df.empty:
+        df = df.sort_values(['source', 'target'], ascending=[True, True])
+        df.to_csv(csv_path, index=False, encoding='utf-8', header=False)
+        print(f"转换成功: {txt_path} -> {csv_path}")
+        return True
+    else:
+        print("警告: 转换后的矩阵为空 (可能是阈值过高)")
+        return False
 
-# 使用中位数与绝对中位差(MAD)方法约束格兰杰因果矩阵
+# 约束函数 (保持不变)
 def constrain_gc_matrix_with_mad(gc_csv_path, output_csv_path, series_num, mad_multiplier=1.0):
-
+    # ... (代码与原版相同，省略以节省空间) ...
     gc_df = pd.read_csv(gc_csv_path, header=None)
     
     # 重建GC权重矩阵
@@ -437,8 +497,8 @@ def constrain_gc_matrix_with_mad(gc_csv_path, output_csv_path, series_num, mad_m
     
     return len(constrained_results)
 
-# 
 def constrain_with_std_dev(gc_csv_path, output_csv_path, series_num, std_multiplier=1.5):
+    # ... (代码与原版相同，省略以节省空间) ...
     gc_df = pd.read_csv(gc_csv_path, header=None)
     GC_weights = np.zeros((series_num, series_num))
     for _, row in gc_df.iterrows():
@@ -485,27 +545,96 @@ def constrain_with_std_dev(gc_csv_path, output_csv_path, series_num, std_multipl
         print("均值标准差约束后无满足条件的因果关系，已创建空文件。")
 
 def main(model_path):
-    gc_predict_path = model_path / "GC_matrix.csv"
+    # 定义文件路径
+    fused_txt_path = model_path / "final_fused_gc.txt" # 训练生成的融合矩阵
+    gc_predict_path = model_path / "GC_matrix.csv"     # 转换后给绘图用的CSV
     gc_constrain_path = model_path / "GC_matrix_constrained.csv"
     GC_predict = model_path / "GC_predict.png"
     causal_links_path = model_path / "causal_links.png"
     
+    # 1. 加载模型用于预测对比 (加载的是 origin 模型)
     model = load_model(model_path, DEVICE)
     model.eval()
     
-    res = save_gc_matrix_to_csv(model, gc_predict_path, threshold=0.0, ignore_self_causality=True, is_softmax=False)
+    # 2. 处理 GC 矩阵
+    # [关键修改] 不再从模型重新推断 GC，而是加载训练好的融合矩阵并转换格式
+    # 这样做才能利用时间反演带来的去噪效果
+    success = convert_fused_txt_to_csv(fused_txt_path, gc_predict_path, threshold=0.0, is_softmax=False)
     
-    if res:
+    # 如果转换失败（例如找不到文件），回退到旧方法（仅使用 origin 模型推断）
+    if not success:
+        print("⚠️ 警告: 未找到融合矩阵 txt 文件，正在回退到仅使用原始模型推断 GC...")
+        success = save_gc_matrix_to_csv(model, gc_predict_path, threshold=0.0, ignore_self_causality=True, is_softmax=False)
+
+    if success:
+        # 接下来的步骤与之前相同，基于 gc_predict_path (CSV) 进行处理
         # constrain_gc_matrix_with_mad(gc_predict_path, gc_constrain_path, model.series_num, mad_multiplier=1.0)
         constrain_with_std_dev(gc_predict_path, gc_constrain_path, model.series_num, std_multiplier=0.3)
-        plot_gc_triple_compare(gc_predict_path,gc_constrain_path,  model.series_num, GC_predict, true_csv_path=GC_PATH, show_weights=True)
+        
+        # 绘图和评估
+        plot_gc_triple_compare(gc_predict_path, gc_constrain_path, model.series_num, GC_predict, true_csv_path=GC_PATH, show_weights=True)
         mae, mse = prediction_compare(model, X_DATA, Y_DATA, model.series_num, save_path=model_path, series_name=SERIES_NAME)
+        # accuracy, precision, recall, f1_score = model_eval(gc_predict_path, GC_PATH, model.series_num)
+        
+        # 热力图只能画原始模型的（因为反演模型没有加载到这里，且热力图是看模型权重的）
         plot_first_layer_weights_heatmap(model, 1, save_path=model_path / "first_layer_weights_heatmap.png", use_abs_weights=True)
         save_causal_links(csv_path = gc_constrain_path, img_save_path = causal_links_path)
+
+# [补充] 如果你删掉了 save_gc_matrix_to_csv 函数，请把它加回来作为 fallback，或者直接去掉 fallback 逻辑
+def save_gc_matrix_to_csv(model, save_path, threshold=0.0, ignore_self_causality=True, is_softmax = True):
+    # ... (代码与原版相同，保留作为 fallback) ...
+    GC_est_norms_tensor = model.GC(threshold=False, ignore_kernel=True) 
+    GC_est_norms = GC_est_norms_tensor.detach().cpu().numpy()
+    if GC_est_norms.size == 0 | np.all(GC_est_norms == 0):
+        print("模型未估计出格兰杰因果关系，GC_est_norms为空或全为0。")
+        return False
+    
+    series_num = GC_est_norms.shape[0]
+    
+    if is_softmax: # 是否应用softmax
+        if ignore_self_causality:
+            # 将对角线元素设为极小值，避免影响softmax计算
+            GC_est_norms_masked = GC_est_norms.copy()
+            np.fill_diagonal(GC_est_norms_masked, -np.inf)
+            
+            # 按行应用softmax
+            GC_est_norms_softmax = softmax(GC_est_norms_masked, axis=1)
+            
+            # 将对角线元素重新设为0
+            np.fill_diagonal(GC_est_norms_softmax, 0)
+        else:
+            GC_est_norms_softmax = softmax(GC_est_norms, axis=1)
         
+        GC_est_norms = GC_est_norms_softmax
+    
+    # 创建结果列表
+    results = []
+    
+    for i in range(series_num):  # i是受影响的序列（果）
+        for j in range(series_num):  # j是原因序列（因）
+            # 如果屏蔽自因果关系且i==j，则跳过
+            if ignore_self_causality and i == j:
+                continue
+                
+            weight = round(GC_est_norms[i, j], 3) # 保留三位小数
+            # 只保存权重大于阈值的因果关系
+            if weight > threshold:
+                results.append({
+                    'source': j,
+                    'target': i, 
+                    'strength': weight
+                })
+    
+    # 转换为DataFrame并保存
+    df = pd.DataFrame(results)
+    df = df.sort_values(['source', 'target'], ascending=[True, True])  # 先按因升序，再按果降序
+    df.to_csv(save_path, index=False, encoding='utf-8', header=False)
+    
+    print(f"格兰杰因果矩阵已保存至: {save_path}")
+    return True
 
 if __name__ == "__main__":
-    run_id = get_latest_run_id()
-    # run_id = '12-18_22-14-04'
+    # run_id = get_latest_run_id()
+    run_id = '12-16_20-50-46' # 记得修改为你新训练的 run_id
     model_path = Path('saved') / run_id
     main(model_path)

@@ -35,7 +35,7 @@ def objective(trial, logger, save_dir):
     # 训练参数
     dropout = trial.suggest_float('dropout', 0, 0.3)
     lr = trial.suggest_float('lr', 0.006, 0.05, log=True) # 学习率
-    lasso_param = trial.suggest_float('lasso_param', 0.001, 1, log=True) 
+    lasso_param = trial.suggest_float('lasso_param', 0.001, 0.01, log=True) 
     ridge_param = trial.suggest_float('ridge_param', 0.001, 0.1, log=True)
     loss_functions_list = {
         'MSELoss': nn.MSELoss(), # 均方误差损失

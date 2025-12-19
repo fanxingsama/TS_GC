@@ -19,6 +19,7 @@ from model.TS_GC import MutiTS_GC
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
+# ISTA算法的硬截断，使用软阈值算子 (Soft Thresholding) 把小的权重直接“归零”
 def PGD_update(network, lam, lr, penalty):
     hidden, p, lag = network.shape
     if penalty == 'GL': # 组Loss惩罚
@@ -63,7 +64,7 @@ class TS_GC_Trainer:
                  X_full, Y_full, penalty_type, lasso_param, ridge_param, 
                  check_every=10, lookback=5, logger=None, verbose=1):
         self.model = model
-        self.epochs = epochs # These are ISTA iterations
+        self.epochs = epochs
         self.save_dir = save_dir
         self.criterion = criterion
         self.logger = logger
@@ -85,14 +86,24 @@ class TS_GC_Trainer:
         self.best_loss = float('inf')
         self.best_it = None
         self.best_model_state = None
+        
+        # 准备双显卡
+        # if isinstance(self.model, nn.DataParallel):
+        #     self.model_core = self.model.module
+        # else:
+        #     self.model_core = self.model
+        self.model_core = self.model
 
         self.first_layer_params_list = self.model.get_first_layer_weights() # List of weight tensors
 
     def train(self, save_model=False):
+        # 预热参数，前300次不进行稀疏惩罚
+        warmup_iters = 300
+        
         for ista_iter in range(self.epochs):
             current_smooth_loss, total_mse_loss, ridge_loss_val = self._compute_smooth_loss(self.X_full, self.Y_full)
 
-            # 2. Backward pass for the smooth part
+            # 2. 反向传播计算梯度
             self.model.zero_grad()
             current_smooth_loss.backward()
 
@@ -101,22 +112,21 @@ class TS_GC_Trainer:
                     if param.grad is not None:
                         param.data.sub_(self.base_lr * param.grad) # In-place subtraction
 
-            # 4. Proximal update for the first layer weights
-            if self.lasso_param > 0:
+            # 4. 第一层权重更新
+            if self.lasso_param > 0 and ista_iter > warmup_iters:
                 with torch.no_grad():
-                    for weight_tensor in self.first_layer_params_list: # Iterate through the list of weight tensors
-                        if weight_tensor is not None: # Should always be not None
+                    for weight_tensor in self.first_layer_params_list: # 遍历第一层权重张量
+                        if weight_tensor is not None:
                              PGD_update(weight_tensor, self.lasso_param, self.base_lr, self.penalty_type)
             
             # 定期检查
             if (ista_iter + 1) % self.check_every == 0:
-                with torch.no_grad(): # Ensure no gradients are computed for monitoring
-                    # Re-calculate smooth loss with updated parameters
+                with torch.no_grad(): # 在评估时不需要梯度计算
                     eval_smooth_loss, total_mse_loss, ridge_loss_val = self._compute_smooth_loss(self.X_full, self.Y_full)
                     eval_nonsmooth_loss = self._compute_nonsmooth_loss()
                     mean_loss = (eval_smooth_loss + eval_nonsmooth_loss) / self.series_num
                 
-                self.train_losses.append(mean_loss.item()) # Store as float
+                self.train_losses.append(mean_loss.item())
                 
                 if self.verbose > 0:
                     print(f"{'='*10} ISTA Iter = {ista_iter + 1} {'='*10}")
@@ -164,6 +174,7 @@ class TS_GC_Trainer:
         smooth_loss = total_mse_loss + self._ridge_regularize()
         return smooth_loss, total_mse_loss, self._ridge_regularize()
 
+    # 计算非平滑损失
     def _compute_nonsmooth_loss(self):
         total_lasso_loss = 0
         for weight_tensor in self.first_layer_params_list:
@@ -171,17 +182,18 @@ class TS_GC_Trainer:
                  total_lasso_loss += lasso_penalty(weight_tensor, self.lasso_param, self.penalty_type)
         return total_lasso_loss
 
+    # 岭回归正则化
     def _ridge_regularize(self):
         ridge_loss = torch.tensor(0.0, device=self.device) # Initialize on correct device
         if self.ridge_param > 0:
             for param in self.model.parameters():
-                if param.requires_grad: # Only regularize parameters that are learnable
+                if param.requires_grad:
                     ridge_loss += torch.sum(param ** 2)
         return self.ridge_param * ridge_loss
 
     def cleanup(self):
         self.best_model_state = None
-        self.train_losses = [float(x) for x in self.train_losses] # Ensure they are floats
+        self.train_losses = [float(x) for x in self.train_losses] 
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -208,13 +220,13 @@ def main():
     train_logger = get_logger() # 日志记录器
 
     lr = 0.01      
-    lasso_param = 0.02 
+    lasso_param = 0.005 
     ridge_param = 0.001
     penalty_type = 'GSGL' 
     feature_dim = 64
     kernel_size = 5    
     dropout = 0     
-    temporal_layers = 2 
+    temporal_layers = 3 
     loss_function = nn.MSELoss()
    
     model = MutiTS_GC(
@@ -255,7 +267,7 @@ def main():
     f"模型架构:\n"
     f"  - 模型: {model}\n"
     f"模型参数:\n"
-    f"  - feature_dim: {FEATURE_DIM}\n"
+    f"  - feature_dim: {feature_dim}\n"
     f"  - kernel_size: {kernel_size}\n"
     f"  - dropout: {dropout}\n"
     f"训练参数:\n"
