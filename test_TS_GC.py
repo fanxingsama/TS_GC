@@ -437,7 +437,6 @@ def constrain_gc_matrix_with_mad(gc_csv_path, output_csv_path, series_num, mad_m
     
     return len(constrained_results)
 
-# 
 def constrain_with_std_dev(gc_csv_path, output_csv_path, series_num, std_multiplier=1.5):
     gc_df = pd.read_csv(gc_csv_path, header=None)
     GC_weights = np.zeros((series_num, series_num))

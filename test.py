@@ -1,114 +1,66 @@
-from matplotlib import rcParams
-import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import networkx as nx
-from matplotlib.patches import FancyArrowPatch, Circle
+import seaborn as sns
+from matplotlib.colors import LinearSegmentedColormap
 
-rcParams['font.family'] = 'SimHei'
-rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
+# 设置中文字体
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
-def show_granger_causality_graph(csv_path, img_save_path=None):
-    df = pd.read_csv('saved/05-30_16-30-55/GC_matrix_constrained.csv', header=None, names=['source', 'target', 'weight'])
-
-    # 解析数据
-    edges = []
-    for _, row in df.iterrows():
-        edges.append((int(row['source']), int(row['target']), float(row['weight'])))
-
-    # 创建有向图
-    G = nx.DiGraph()
-
-    # 添加边和权重
-    for source, target, weight in edges:
-        G.add_edge(source, target, weight=weight)
-
-    # 获取所有节点
-    nodes = list(G.nodes())
-    nodes.sort()  # 确保节点顺序一致
-
-    # 创建环形布局
-    pos = {}
-    n_nodes = len(nodes)
-    for i, node in enumerate(nodes):
-        angle = 2 * np.pi * i / n_nodes - np.pi/2  # 从顶部开始
-        pos[node] = (np.cos(angle), np.sin(angle))
-
-    # 设置图形大小和样式
-    plt.figure(figsize=(12, 12))
-    ax = plt.gca()
-    ax.set_aspect('equal')
-
-    # 绘制边（有向箭头）
-    for source, target, data in G.edges(data=True):
-        weight = data['weight']
-        
-        # 获取起点和终点坐标
-        x1, y1 = pos[source]
-        x2, y2 = pos[target]
-        
-        # 计算箭头的起点和终点（考虑节点大小）
-        node_radius = 0.08
-        
-        # 计算方向向量
-        dx = x2 - x1
-        dy = y2 - y1
-        length = np.sqrt(dx**2 + dy**2)
-        
-        # 标准化方向向量
-        if length > 0:
-            dx_norm = dx / length
-            dy_norm = dy / length
-            
-            # 调整起点和终点
-            start_x = x1 + node_radius * dx_norm
-            start_y = y1 + node_radius * dy_norm
-            end_x = x2 - node_radius * dx_norm
-            end_y = y2 - node_radius * dy_norm
-            
-            # 创建箭头
-            arrow = FancyArrowPatch(
-                (start_x, start_y), (end_x, end_y),
-                arrowstyle='->', 
-                mutation_scale=15,
-                color='#666666',
-                linewidth=1,
-                alpha=0.7
-            )
-            ax.add_patch(arrow)
-
-    # 绘制节点
-    node_colors = '#4285f4'  # 蓝色
-    node_size = 800
-
-    nx.draw_networkx_nodes(G, pos, 
-                        node_color=node_colors,
-                        node_size=node_size,
-                        alpha=0.9,
-                        edgecolors='white',
-                        linewidths=2)
-
-    # 绘制节点标签
-    labels = {node: f'X{node}' for node in nodes}
-    nx.draw_networkx_labels(G, pos, labels,
-                        font_size=12,
-                        font_color='white',
-                        font_weight='bold')
-
-    # 设置图形属性
-    plt.title('格兰杰因果关系图\nGranger Causality Network', 
-            fontsize=16, fontweight='bold', pad=20)
-
-    # 移除坐标轴
-    plt.axis('off')
-
-    # 设置图形边界
-    plt.xlim(-1.3, 1.3)
-    plt.ylim(-1.3, 1.3)
-
-    # 调整布局
+def create_granger_causality_matrix():
+    """
+    创建格兰杰因果矩阵可视化
+    """
+    # 示例数据：5x5格兰杰因果矩阵，按照图像的强度分布
+    granger_matrix = np.array([
+        [0.7, 0.0, 0.0, 0.0, 0.0],
+        [0.0, 0.7, 0.8, 0.0, 1.0],
+        [0.0, 0.0, 0.0, 0.9, 1.0],
+        [0.0, 0.8, 0.0, 0.8, 0.0],
+        [0.0, 0.0, 0.0, 0.6, 0.0]
+        # [0.7, 0.5, 0.2, 0.4, 0.2],
+        # [0.2, 0.7, 0.8, 0.2, 1.0],
+        # [0.5, 0.2, 0.4, 0.9, 1.0],
+        # [0.3, 0.8, 0.2, 0.8, 0.2],
+        # [0.4, 0.5, 0.3, 0.6, 0.4]
+    ])
+    
+    # 创建自定义色彩映射 - 从浅蓝到深蓝
+    colors = ['#FFFFFF', '#E8F4FD', '#B8D4E3', '#7FB3D3', '#4682B4', '#1E3A8A']
+    n_bins = 100
+    cmap = LinearSegmentedColormap.from_list('blue_gradient', colors, N=n_bins)
+    
+    # 创建图形
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # 绘制热力图，移除边框和刻度
+    im = ax.imshow(granger_matrix, cmap=cmap, aspect='equal', vmin=0, vmax=1)
+    
+    # 移除刻度和标签
+    ax.set_xticks([])
+    ax.set_yticks([])
+    
+    # 移除边框
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    
+    # 不显示数值标注
+    
+    # 不添加颜色条、标题和标签
+    
+    # 不添加网格线
+    
     plt.tight_layout()
-    plt.show()
+    return fig, granger_matrix
 
-    # 如果你想保存图片，取消下面的注释
-    plt.savefig(img_save_path, dpi=300, bbox_inches='tight')
+
+# 执行示例
+if __name__ == "__main__":
+    # 创建示例矩阵图
+    fig, matrix = create_granger_causality_matrix()
+    plt.show()
+    
+    
+    print(f"\n生成的矩阵:\n{matrix}")
