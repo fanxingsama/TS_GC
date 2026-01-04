@@ -398,7 +398,7 @@ def main(model_path):
         save_causal_links(csv_path=gc_constrain_path, img_save_path=causal_links_path, series_names=SERIES_NAME)
         
 if __name__ == "__main__":
-    run_id = get_latest_run_id()
-    # run_id = '12-19_22-01-44'
+    # run_id = get_latest_run_id()
+    run_id = '01-04_21-32-55'
     model_path = Path('saved') / run_id
     main(model_path)

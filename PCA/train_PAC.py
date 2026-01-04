@@ -4,7 +4,7 @@ from pca_core import WaveletDenoiser, RobustScaler, RNSPCA
 
 def train_from_csv(file_path, model_path='pca_pipeline.pkl'):
     df_train = pd.read_csv(file_path)
-    denoiser = WaveletDenoiser()
+    denoiser = WaveletDenoiser(wavelet='sym8', level=3)
     scaler = RobustScaler()
     model = RNSPCA(n_components=6, sparsity_k=4)
 
