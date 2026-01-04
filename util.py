@@ -48,17 +48,19 @@ def simulate_var(p, T, lag, sparsity=0.2, beta_value=1.0, sd=0.1, seed=0):
 
     return X.T[burn_in:], beta, GC
 
+# 将时间序列数据处理为适合时间序列预测模型训练
 def create_data(data_path, input_window, output_window):
     prediction_input_df = pd.read_csv(data_path)
-    series_names = prediction_input_df.columns.tolist() # 表头已经在这里
-    # prediction_input_df = prediction_input_df.iloc[:, :len(all_series_cols)] # 这行其实可以省略，因为all_series_cols就是所有列
+    series_names = prediction_input_df.columns.tolist() # 提取序列名称
     
     data_np = prediction_input_df[series_names].values.astype(np.float32) 
     num_timesteps, num_series = data_np.shape
     
+    # 数据归一化
     scaler = MinMaxScaler(feature_range=(0, 1))
     data_np = scaler.fit_transform(data_np)
 
+    # 构建输入输出数据
     X_list, Y_list = [], []
     for i in range(num_timesteps - input_window - output_window + 1):
         X_list.append(data_np[i : i + input_window, :])
