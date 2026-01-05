@@ -4,9 +4,9 @@ import os
 import sys
 
 # === 配置区域 ===
-csv_file_path = 'high_fault_重复.csv'  # 在这里修改你的CSV文件路径
-output_folder = 'high_fault_重复'   # 图片保存的文件夹名称
-points_to_plot = None            # 只画前1000个点
+csv_file_path = 'normal_重复.csv'  # 在这里修改你的CSV文件路径
+output_folder = 'normal_重复'   # 图片保存的文件夹名称
+points_to_plot = None            # 选择画多少个点
 # ================
 
 def visualize_sensors(file_path, save_dir, limit=1000):
@@ -51,6 +51,7 @@ def visualize_sensors(file_path, save_dir, limit=1000):
             plt.plot(df.index, df[col_name], linewidth=1.5)
             
             plt.title(f"测点: {col_name}", fontsize=12)
+            plt.xlabel("前 10000 个采样点")
             plt.ylabel("值")
             plt.grid(True, alpha=0.3)
             plt.tight_layout()

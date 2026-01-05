@@ -14,7 +14,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, TensorDataset # 新增导入
 
-from logger.logger import get_logger, setup_logging
+from util.logger import get_logger, setup_logging
 from model.TS_GC import MutiTS_GC
 
 rcParams['font.family'] = 'SimHei'

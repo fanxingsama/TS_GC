@@ -101,5 +101,5 @@ def analyze_root_cause_visualized(file_path):
 
 if __name__ == "__main__":
     # 请确保这里是你的CSV文件路径
-    file_path = 'GC_matrix_constrained.csv' 
+    file_path = 'GC_matrix.csv' 
     analyze_root_cause_visualized(file_path)

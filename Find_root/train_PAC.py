@@ -1,6 +1,6 @@
 import pandas as pd
 import pickle
-from pca_core import WaveletDenoiser, RobustScaler, RNSPCA
+from Find_root.RSPCA import WaveletDenoiser, RobustScaler, RNSPCA
 
 def train_from_csv(file_path, model_path='pca_pipeline.pkl'):
     df_train = pd.read_csv(file_path)

@@ -142,7 +142,8 @@ class RNSPCA:
     def trigger_diagnose(self, X_scaled_fault):
         """故障诊断：计算 DCC 并判定根因"""
         fault_cont_T2, fault_cont_SPE = self._calculate_all_contributions(X_scaled_fault)
-        DCC = np.abs(fault_cont_T2 - self.normal_baseline_T2)
+        # DCC = np.abs(fault_cont_T2 - self.normal_baseline_T2)
+        DCC = np.abs(fault_cont_SPE - self.normal_baseline_SPE)
         DCC_norm = DCC / (np.sum(DCC) + 1e-10)
         root_causes = np.where(DCC_norm > self.lmvt)[0]
         

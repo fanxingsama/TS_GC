@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import functools
-from logger.logger import get_logger, setup_logging
+from util.logger import get_logger, setup_logging
 import optuna
 from train_TS_GC import TS_GC_Trainer
 from model.TS_GC import MutiTS_GC

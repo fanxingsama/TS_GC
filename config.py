@@ -1,17 +1,17 @@
 # config.py
 import torch
-from util import create_data
+from util.util import create_data
 import os
 
 
 # DATA_PATH = os.path.join('data', 'simu_data', 'series_data2.csv')
 # GC_PATH = os.path.join('data', 'simu_data', 'granger_causality2.csv')
 
-# DATA_PATH = os.path.join('data', 'data_use.csv')
-# GC_PATH = None
-
-DATA_PATH = os.path.join('data', 'test_train_gc.csv')
+DATA_PATH = os.path.join('data', 'data_use.csv')
 GC_PATH = None
+
+# DATA_PATH = os.path.join('data', 'high_train_gc.csv')
+# GC_PATH = None
 
 DATA_SEED = 42
 BATCH_SIZE = 1024

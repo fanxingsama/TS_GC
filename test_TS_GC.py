@@ -9,8 +9,8 @@ import pandas as pd
 from config import * # 确保这里面包含了 SERIES_NAME
 from model.TS_GC import MutiTS_GC
 import os
-from visual.plot_causal_link import save_causal_links
-from util import get_latest_run_id
+from util.plot_causal_link import save_causal_links
+from util.util import get_latest_run_id
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -399,6 +399,6 @@ def main(model_path):
         
 if __name__ == "__main__":
     # run_id = get_latest_run_id()
-    run_id = '01-04_21-32-55'
+    run_id = '01-05_11-23-56'
     model_path = Path('saved') / run_id
     main(model_path)

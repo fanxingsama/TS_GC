@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import matplotlib.pyplot as plt
-from pca_core import WaveletDenoiser, RobustScaler, RNSPCA
+from Find_root.RSPCA import WaveletDenoiser, RobustScaler, RNSPCA
 
 def diagnose_from_csv(file_path, model_path='pca_pipeline.pkl', output_img='diagnostic_report.png'):
     """
@@ -19,6 +19,9 @@ def diagnose_from_csv(file_path, model_path='pca_pipeline.pkl', output_img='diag
     denoiser = pipeline['denoiser']
     scaler = pipeline['scaler']
     model = pipeline['model']
+    # 查看模型里存储的正常基准值
+    print("正常工况 T2 基准值 (前5个变量):", model.normal_baseline_T2[:5])
+    print("正常工况 SPE 基准值 (前5个变量):", model.normal_baseline_SPE[:5])
 
     # 2. 读取测试数据
     print(f">>> 正在读取待检测数据: {file_path}")
@@ -50,27 +53,27 @@ def diagnose_from_csv(file_path, model_path='pca_pipeline.pkl', output_img='diag
 
 def plot_results(diag_res, dcc_scores, top_indices, feature_names, output_img, lmvt):
     n_vars = len(dcc_scores)
-    plt.figure(figsize=(12, 10))
+    plt.figure(figsize=(12, 6))
     x_idx = np.arange(n_vars)
     
-    # 子图1: T2 贡献度对比
-    plt.subplot(3, 1, 1)
-    plt.bar(x_idx - 0.2, diag_res['before_T2'], 0.4, label='Normal Baseline', color='gray', alpha=0.5)
-    plt.bar(x_idx + 0.2, diag_res['after_T2'], 0.4, label='Fault Current', color='royalblue')
-    plt.title('Hotelling $T^2$ Contribution (Baseline vs Fault)')
-    plt.ylabel('Contribution')
-    plt.legend()
+    # # 子图1: T2 贡献度对比
+    # plt.subplot(3, 1, 1)
+    # plt.bar(x_idx - 0.2, diag_res['before_T2'], 0.4, label='Normal Baseline', color='gray', alpha=0.5)
+    # plt.bar(x_idx + 0.2, diag_res['after_T2'], 0.4, label='Fault Current', color='royalblue')
+    # plt.title('Hotelling $T^2$ Contribution (Baseline vs Fault)')
+    # plt.ylabel('Contribution')
+    # plt.legend()
 
-    # 子图2: SPE 贡献度对比
-    plt.subplot(3, 1, 2)
-    plt.bar(x_idx - 0.2, diag_res['before_SPE'], 0.4, label='Normal Baseline', color='gray', alpha=0.5)
-    plt.bar(x_idx + 0.2, diag_res['after_SPE'], 0.4, label='Fault Current', color='seagreen')
-    plt.title('SPE Contribution (Baseline vs Fault)')
-    plt.ylabel('Contribution')
-    plt.legend()
+    # # 子图2: SPE 贡献度对比
+    # plt.subplot(2, 1, 1)
+    # plt.bar(x_idx - 0.2, diag_res['before_SPE'], 0.4, label='Normal Baseline', color='gray', alpha=0.5)
+    # plt.bar(x_idx + 0.2, diag_res['after_SPE'], 0.4, label='Fault Current', color='seagreen')
+    # plt.title('SPE Contribution (Baseline vs Fault)')
+    # plt.ylabel('Contribution')
+    # plt.legend()
 
-    # 子图3: DCC 根因诊断图
-    plt.subplot(3, 1, 3)
+    # # 子图3: DCC 根因诊断图
+    # plt.subplot(2, 1, 2)
     colors = ['crimson' if i in top_indices else 'gold' for i in range(n_vars)]
     plt.bar(x_idx, dcc_scores, color=colors)
     plt.axhline(y=lmvt, color='black', linestyle='--', label=f'Threshold (LMVT={lmvt:.3f})')
