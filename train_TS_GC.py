@@ -281,7 +281,7 @@ class TS_GC_Trainer:
         plt.close()
 
 def main():
-    run_id = datetime.now().strftime(r'%m-%d_%H-%M-%S')
+    run_id = datetime.now().strftime(r'%Y-%m-%d_%H-%M-%S')
     save_dir = Path('saved') / run_id
     setup_logging(save_dir)
     train_logger = get_logger() # 日志记录器

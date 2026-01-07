@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import matplotlib.pyplot as plt
-from Find_root.RSPCA import WaveletDenoiser, RobustScaler, RNSPCA
+from RSPCA import WaveletDenoiser, RobustScaler, RNSPCA
 
 def diagnose_from_csv(file_path, model_path='pca_pipeline.pkl', output_img='diagnostic_report.png'):
     """

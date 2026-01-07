@@ -34,8 +34,8 @@ def get_latest_run_id():
         return None
     
     # 获取所有符合格式的目录名
-    pattern = re.compile(r'^\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
-    timestamps = [d.name for d in base_path.iterdir() 
+    pattern = re.compile(r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$')
+    timestamps = [d.name for d in base_path.iterdir()
                  if d.is_dir() and pattern.match(d.name)]
     
     return max(timestamps) if timestamps else None

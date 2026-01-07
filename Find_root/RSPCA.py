@@ -59,29 +59,35 @@ class RobustScaler:
 
 class RNSPCA:
     """稀疏核主成分分析（RNSPCA）"""
-    def __init__(self, n_components=6, sparsity_k=4, sigma=1.0):
+    def __init__(self, n_components=6, sparsity_k=4, sigma=1.0, window_size=3):
         self.n_components = n_components  # 保留的主成分数量
         self.sparsity_k = sparsity_k      # 稀疏性控制
         self.sigma = sigma                # 高斯核带宽
+        self.window_size = window_size  # 新增：窗口大小
         self.V_sparse = None              # 稀疏主成分矩阵
         self.pseudo_values = None         # 伪特征值
         self.lmvt = None                  # LMVT阈值
         self.normal_baseline_T2 = None    # 正常工况T²贡献度基准
         self.normal_baseline_SPE = None   # 正常工况SPE贡献度基准
+        self.n_original_vars = None # 记录原始变量数
+
 
     def _compute_hsic_matrix(self, X):
         """核相关矩阵计算，捕捉特征间的非线性相关关系"""
         n_samples, n_vars = X.shape
         H = np.eye(n_samples) - (1.0 / n_samples) * np.ones((n_samples, n_samples))
         K_list = []
+        # 为每个特征生成中心化的高斯核矩阵，是 HSIC 计算的基础
         for i in range(n_vars):
+            print(f"正在生成高斯核矩阵: 变量 {i+1}/{n_vars}...")
             xi = X[:, i].reshape(-1, 1)
-            dist = squareform(pdist(xi, 'sqeuclidean'))
+            dist = squareform(pdist(xi, 'sqeuclidean')) # 计算平方欧氏距离矩阵
             Ki = np.exp(-dist / (2 * self.sigma**2))
             K_list.append(H @ Ki @ H)
         
         hsic_matrix = np.zeros((n_vars, n_vars))
         for i in range(n_vars):
+            print(f"正在计算HSIC矩阵: 协方差矩阵 {i+1}/{n_vars}...")
             for j in range(i, n_vars):
                 score = np.trace(K_list[i] @ K_list[j]) / (n_samples - 1)**2
                 hsic_matrix[i, j] = hsic_matrix[j, i] = score
@@ -96,6 +102,7 @@ class RNSPCA:
         # SPE 贡献度 (基于残差平方)
         X_hat = scores @ self.V_sparse.T
         SPE_cont_matrix = (X_scaled - X_hat)**2
+        
         return np.mean(T2_cont_matrix, axis=0), np.mean(SPE_cont_matrix, axis=0)
 
     def fit_offline(self, X_scaled):
@@ -105,11 +112,13 @@ class RNSPCA:
         kernel_corr = self._compute_hsic_matrix(X_scaled)
         
         sigma_t = kernel_corr.copy()
+        print("copy结束")
         delta_t = np.eye(self.n_vars)
         self.V_sparse = np.zeros((self.n_vars, self.n_components))
         self.pseudo_values = np.zeros(self.n_components)
         
         for t in range(self.n_components):
+            print(f"正在提取第 {t+1}/{self.n_components} 个主成分...")
             eig_vals, eig_vecs = np.linalg.eigh(sigma_t)
             idx = np.argsort(eig_vals)[-1]
             v_t = eig_vecs[:, idx]
