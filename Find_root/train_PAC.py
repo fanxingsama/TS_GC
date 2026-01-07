@@ -6,7 +6,7 @@ def train_from_csv(file_path, model_path='pca_pipeline.pkl'):
     df_train = pd.read_csv(file_path)
     denoiser = WaveletDenoiser(wavelet='sym8', level=3)
     scaler = RobustScaler()
-    model = RNSPCA(n_components=6, sparsity_k=4)
+    model = RNSPCA(n_components=6, sparsity_k=4, window_size=3)
 
     X_denoised = denoiser.transform(df_train)
     scaler.fit(X_denoised)

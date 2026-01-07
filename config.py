@@ -7,11 +7,11 @@ import os
 # DATA_PATH = os.path.join('data', 'simu_data', 'series_data2.csv')
 # GC_PATH = os.path.join('data', 'simu_data', 'granger_causality2.csv')
 
-DATA_PATH = os.path.join('data', 'data_use.csv')
-GC_PATH = None
-
-# DATA_PATH = os.path.join('data', 'high_train_gc.csv')
+# DATA_PATH = os.path.join('data', 'data_use.csv')
 # GC_PATH = None
+
+DATA_PATH = os.path.join('data', 'potential_var.csv')
+GC_PATH = None
 
 DATA_SEED = 42
 BATCH_SIZE = 1024

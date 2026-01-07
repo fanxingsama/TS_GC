@@ -2,3 +2,6 @@
 *.pth
 *.pyc
 saved/
+data/normal_重复
+data/low_fault_重复
+data/high_fault_重复

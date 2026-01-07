@@ -2,34 +2,59 @@ import numpy as np
 import pandas as pd
 import pickle
 import matplotlib.pyplot as plt
+import os
+from datetime import datetime
 from RSPCA import WaveletDenoiser, RobustScaler, RNSPCA
 
-def diagnose_from_csv(file_path, model_path='pca_pipeline.pkl', output_img='diagnostic_report.png'):
+def diagnose_from_csv(file_path, model_path='pca_pipeline.pkl', top_k=5):
     """
-    读取异常 CSV 并进行诊断
+    读取异常 CSV 并进行诊断，手动指定提取前 top_k 个异常变量
+    top_k: 指定要提取并保存的潜在异常变量数量
     """
+    # ==========================================
+    # 0. 文件夹与路径设置
+    # ==========================================
+    root_save_dir = 'PCA_saved'
+    current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    save_dir = os.path.join(root_save_dir, current_time)
+    
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        print(f">>> 已创建结果保存文件夹: {save_dir}")
+        
+    output_img_path = os.path.join(save_dir, 'diagnostic_report.png')
+    output_csv_path = os.path.join(save_dir, 'potential_var.csv')
+
+    # ==========================================
     # 1. 加载模型
+    # ==========================================
     try:
         with open(model_path, 'rb') as f:
             pipeline = pickle.load(f)
     except FileNotFoundError:
-        print("错误：未找到模型文件，请先运行 model_trainer.py")
+        print("错误：未找到模型文件，请先运行 train_PAC.py")
         return
 
     denoiser = pipeline['denoiser']
     scaler = pipeline['scaler']
     model = pipeline['model']
-    # 查看模型里存储的正常基准值
-    print("正常工况 T2 基准值 (前5个变量):", model.normal_baseline_T2[:5])
-    print("正常工况 SPE 基准值 (前5个变量):", model.normal_baseline_SPE[:5])
+    
+    print(f"当前模型配置: Window Size = {model.window_size}")
 
+    # ==========================================
     # 2. 读取测试数据
+    # ==========================================
     print(f">>> 正在读取待检测数据: {file_path}")
     df_test = pd.read_csv(file_path)
-    # 获取变量名称（用于图表展示）
     feature_names = df_test.columns.tolist()
 
+    if len(df_test) < model.window_size:
+        print(f"错误：测试数据行数 ({len(df_test)}) 少于模型窗口大小 ({model.window_size})")
+        return
+
+    # ==========================================
     # 3. 数据预处理与计算
+    # ==========================================
     X_test_denoised = denoiser.transform(df_test)
     X_test_scaled = scaler.transform(X_test_denoised)
     
@@ -37,60 +62,67 @@ def diagnose_from_csv(file_path, model_path='pca_pipeline.pkl', output_img='diag
     diag_res = model.trigger_diagnose(X_test_scaled)
     dcc_scores = diag_res['dcc_norm']
     
-    # 4. 筛选 Top 10 贡献变量
-    top_indices = np.argsort(dcc_scores)[::-1][:10]
+    # ==========================================
+    # 4. 筛选异常变量 (完全由 top_k 控制)
+    # ==========================================
+    # 按贡献度从大到小排序，取前 top_k 个索引
+    sorted_indices = np.argsort(dcc_scores)[::-1]
+    save_indices = sorted_indices[:top_k]
     
-    print("\n" + "="*40)
+    print("\n" + "="*45)
+    print(f"【诊断报告】 提取贡献度最高的 Top {top_k} 变量")
     print(f"{'排名':<6} | {'变量索引':<10} | {'变量名称':<20} | {'贡献得分'}")
-    print("-"*40)
-    for i, idx in enumerate(top_indices):
+    print("-"*45)
+    
+    for i, idx in enumerate(save_indices):
         name = feature_names[idx] if idx < len(feature_names) else f"Var_{idx}"
-        print(f"{i+1:<8} | {idx:<12} | {name:<22} | {dcc_scores[idx]:.4f}")
-    print("="*40)
+        print(f"{i+1:<8} | {idx:<12} | {name:<20} | {dcc_scores[idx]:.4f}")
+    print("="*45)
 
-    # 5. 可视化保存
-    plot_results(diag_res, dcc_scores, top_indices, feature_names, output_img, model.lmvt)
+    # ==========================================
+    # 5. 提取并保存 CSV
+    # ==========================================
+    # 从原始数据 df_test 中提取这些列
+    df_potential = df_test.iloc[:, save_indices]
+    
+    # 保存 CSV
+    df_potential.to_csv(output_csv_path, index=False)
+    print(f">>> 潜在异常变量数据已分离并保存至: {output_csv_path}")
+    print(f"    包含变量索引: {save_indices}")
 
-def plot_results(diag_res, dcc_scores, top_indices, feature_names, output_img, lmvt):
+    # ==========================================
+    # 6. 可视化保存
+    # ==========================================
+    # 传入 save_indices 以便在图中高亮显示这些变量
+    plot_results(dcc_scores, save_indices, feature_names, output_img_path, top_k)
+
+
+def plot_results(dcc_scores, highlight_indices, feature_names, output_img, top_k):
     n_vars = len(dcc_scores)
     plt.figure(figsize=(12, 6))
     x_idx = np.arange(n_vars)
     
-    # # 子图1: T2 贡献度对比
-    # plt.subplot(3, 1, 1)
-    # plt.bar(x_idx - 0.2, diag_res['before_T2'], 0.4, label='Normal Baseline', color='gray', alpha=0.5)
-    # plt.bar(x_idx + 0.2, diag_res['after_T2'], 0.4, label='Fault Current', color='royalblue')
-    # plt.title('Hotelling $T^2$ Contribution (Baseline vs Fault)')
-    # plt.ylabel('Contribution')
-    # plt.legend()
-
-    # # 子图2: SPE 贡献度对比
-    # plt.subplot(2, 1, 1)
-    # plt.bar(x_idx - 0.2, diag_res['before_SPE'], 0.4, label='Normal Baseline', color='gray', alpha=0.5)
-    # plt.bar(x_idx + 0.2, diag_res['after_SPE'], 0.4, label='Fault Current', color='seagreen')
-    # plt.title('SPE Contribution (Baseline vs Fault)')
-    # plt.ylabel('Contribution')
-    # plt.legend()
-
-    # # 子图3: DCC 根因诊断图
-    # plt.subplot(2, 1, 2)
-    colors = ['crimson' if i in top_indices else 'gold' for i in range(n_vars)]
-    plt.bar(x_idx, dcc_scores, color=colors)
-    plt.axhline(y=lmvt, color='black', linestyle='--', label=f'Threshold (LMVT={lmvt:.3f})')
+    # 颜色逻辑：top_k 的变量显示为红色，其余显示为灰色
+    colors = ['crimson' if i in highlight_indices else 'lightgray' for i in range(n_vars)]
+    
+    plt.bar(x_idx, dcc_scores, color=colors, alpha=0.9)
+    
+    # 不再绘制 LMVT 阈值线，保持画面清爽
     
     # 如果变量名不太长，显示在横轴
     if n_vars <= 30:
-        plt.xticks(x_idx, feature_names, rotation=45, ha='right')
+        plt.xticks(x_idx, feature_names, rotation=45, ha='right', fontsize=9)
     
-    plt.title('Root Cause Diagnosis (DCC Score) - Top 10 in Red')
+    plt.title(f'Root Cause Diagnosis - Top {top_k} Variables Highlighted')
     plt.xlabel('Sensors / Features')
-    plt.ylabel('Normalized Score')
-    plt.legend()
+    plt.ylabel('Normalized Contribution Score')
+    plt.grid(axis='y', linestyle=':', alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(output_img)
-    print(f"\n>>> 诊断可视化报告已保存至: {output_img}")
+    print(f">>> 诊断可视化报告已保存至: {output_img}")
+    plt.close()
 
 if __name__ == "__main__":
-    # 请修改为你的实际异常数据路径
-    diagnose_from_csv('low_fault_重复.csv')
+    # 在这里传入你想提取的变量数量，例如 top_k=5
+    diagnose_from_csv('high_fault_重复.csv', top_k=8)

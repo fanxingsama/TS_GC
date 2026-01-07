@@ -4,8 +4,8 @@ import os
 import sys
 
 # === 配置区域 ===
-csv_file_path = 'normal_重复.csv'  # 在这里修改你的CSV文件路径
-output_folder = 'normal_重复'   # 图片保存的文件夹名称
+csv_file_path = 'high_fault_重复.csv'  # 在这里修改你的CSV文件路径
+output_folder = 'high_fault_重复'   # 图片保存的文件夹名称
 points_to_plot = None            # 选择画多少个点
 # ================
 

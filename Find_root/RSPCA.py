@@ -71,26 +71,92 @@ class RNSPCA:
         self.normal_baseline_SPE = None   # 正常工况SPE贡献度基准
         self.n_original_vars = None # 记录原始变量数
 
-
+    
+    def _create_lagged_matrix(self, X):
+        """
+        构造时间滞后矩阵 (Sliding Window Stacking)
+        输入 shape: (samples, features)
+        输出 shape: (samples - window + 1, features * window)
+        """
+        n_samples, n_features = X.shape
+        if n_samples < self.window_size:
+            raise ValueError(f"数据样本数 ({n_samples}) 小于窗口大小 ({self.window_size})")
+        
+        # 这种方式将 t, t-1, t-2... 拼接到一行
+        # 结果列顺序: [Var1_t, Var2_t, ..., Var1_t-1, Var2_t-1, ...]
+        new_features = []
+        for i in range(self.window_size):
+            # 向后截取，模拟当前时刻包含过去信息
+            # start: 窗口大小-1-i, end: 样本总数-i
+            start = self.window_size - 1 - i
+            end = n_samples - i
+            chunk = X[start:end, :]
+            new_features.append(chunk)
+            
+        # 水平拼接
+        X_lagged = np.hstack(new_features)
+        return X_lagged
+    
+    # def _compute_hsic_matrix(self, X):
+    #     """核相关矩阵计算，捕捉特征间的非线性相关关系"""
+    #     n_samples, n_vars = X.shape
+    #     H = np.eye(n_samples) - (1.0 / n_samples) * np.ones((n_samples, n_samples))
+    #     K_list = []
+    #     # 为每个特征生成中心化的高斯核矩阵，是 HSIC 计算的基础
+    #     for i in range(n_vars):
+    #         print(f"正在生成高斯核矩阵: 变量 {i+1}/{n_vars}...")
+    #         xi = X[:, i].reshape(-1, 1)
+    #         dist = squareform(pdist(xi, 'sqeuclidean')) # 计算平方欧氏距离矩阵
+    #         Ki = np.exp(-dist / (2 * self.sigma**2))
+    #         K_list.append(H @ Ki @ H)
+        
+    #     hsic_matrix = np.zeros((n_vars, n_vars))
+    #     for i in range(n_vars):
+    #         print(f"正在计算HSIC矩阵: 协方差矩阵 {i+1}/{n_vars}...")
+    #         for j in range(i, n_vars):
+    #             score = np.trace(K_list[i] @ K_list[j]) / (n_samples - 1)**2
+    #             hsic_matrix[i, j] = hsic_matrix[j, i] = score
+    #     return hsic_matrix
+    
     def _compute_hsic_matrix(self, X):
         """核相关矩阵计算，捕捉特征间的非线性相关关系"""
         n_samples, n_vars = X.shape
-        H = np.eye(n_samples) - (1.0 / n_samples) * np.ones((n_samples, n_samples))
-        K_list = []
-        # 为每个特征生成中心化的高斯核矩阵，是 HSIC 计算的基础
+        K_centered_list = []
+        
         for i in range(n_vars):
             print(f"正在生成高斯核矩阵: 变量 {i+1}/{n_vars}...")
             xi = X[:, i].reshape(-1, 1)
-            dist = squareform(pdist(xi, 'sqeuclidean')) # 计算平方欧氏距离矩阵
-            Ki = np.exp(-dist / (2 * self.sigma**2))
-            K_list.append(H @ Ki @ H)
+            # 1. 计算距离 (耗时点1)
+            dist_sq = squareform(pdist(xi, 'sqeuclidean'))
+            K = np.exp(-dist_sq / (2 * self.sigma**2))
+            
+            # 2. 快速中心化 (避免使用巨大的 H 矩阵相乘)
+            # K_centered = K - row_means - col_means + grand_mean
+            k_mean_row = K.mean(axis=0, keepdims=True)
+            k_mean_col = K.mean(axis=1, keepdims=True)
+            k_mean_all = K.mean()
+            K_centered = K - k_mean_row - k_mean_col + k_mean_all
+            
+            K_centered_list.append(K_centered)
         
         hsic_matrix = np.zeros((n_vars, n_vars))
+        # 归一化系数
+        normalization = 1.0 / ((n_samples - 1)**2)
+        
         for i in range(n_vars):
             print(f"正在计算HSIC矩阵: 协方差矩阵 {i+1}/{n_vars}...")
-            for j in range(i, n_vars):
-                score = np.trace(K_list[i] @ K_list[j]) / (n_samples - 1)**2
-                hsic_matrix[i, j] = hsic_matrix[j, i] = score
+                
+            # 自相关
+            # 优化技巧：对于对称矩阵，Trace(A @ B) 等价于 Sum(A * B)
+            hsic_matrix[i, i] = np.sum(K_centered_list[i] * K_centered_list[i]) * normalization
+            
+            for j in range(i + 1, n_vars):
+                # 这一步原本是 O(N^3)，现在是 O(N^2)
+                score = np.sum(K_centered_list[i] * K_centered_list[j]) * normalization
+                hsic_matrix[i, j] = score
+                hsic_matrix[j, i] = score
+                
+        print("\nHSIC 矩阵计算完成。")
         return hsic_matrix
 
     def _calculate_all_contributions(self, X_scaled):
@@ -103,18 +169,41 @@ class RNSPCA:
         X_hat = scores @ self.V_sparse.T
         SPE_cont_matrix = (X_scaled - X_hat)**2
         
-        return np.mean(T2_cont_matrix, axis=0), np.mean(SPE_cont_matrix, axis=0)
+        # 取平均得到 (n_vars * window) 长度的向量
+        mean_T2_ext = np.mean(T2_cont_matrix, axis=0)
+        mean_SPE_ext = np.mean(SPE_cont_matrix, axis=0)
+        
+        # 2. 聚合回原始维度 (Aggregation)
+        # 扩展列结构: [Var1_t0, Var2_t0, ..., Var1_t1, Var2_t1, ...]
+        # 我们需要把所有属于 Var1 的贡献加起来
+        final_T2 = np.zeros(self.n_original_vars)
+        final_SPE = np.zeros(self.n_original_vars)
+        
+        for w in range(self.window_size):
+            start_idx = w * self.n_original_vars
+            end_idx = start_idx + self.n_original_vars
+            final_T2 += mean_T2_ext[start_idx:end_idx]
+            final_SPE += mean_SPE_ext[start_idx:end_idx]
+            
+        # 可以选择取平均或者求和，求和能放大信号
+        return final_T2, final_SPE
 
     def fit_offline(self, X_scaled):
         """离线建模逻辑"""
-        self.n_vars = X_scaled.shape[1]
-        self.lmvt = 1.0 / self.n_vars
-        kernel_corr = self._compute_hsic_matrix(X_scaled)
+        self.n_original_vars = X_scaled.shape[1]
+        self.lmvt = 1.0 / self.n_original_vars
+        
+        # 1. 应用滑动窗口
+        print(f"应用滑动窗口 (size={self.window_size})...")
+        X_lagged = self._create_lagged_matrix(X_scaled)
+        n_lagged_vars = X_lagged.shape[1]
+        
+        # 2. 计算核相关矩阵
+        kernel_corr = self._compute_hsic_matrix(X_lagged)
         
         sigma_t = kernel_corr.copy()
-        print("copy结束")
-        delta_t = np.eye(self.n_vars)
-        self.V_sparse = np.zeros((self.n_vars, self.n_components))
+        delta_t = np.eye(n_lagged_vars)
+        self.V_sparse = np.zeros((n_lagged_vars, self.n_components))
         self.pseudo_values = np.zeros(self.n_components)
         
         for t in range(self.n_components):
@@ -132,11 +221,11 @@ class RNSPCA:
             self.V_sparse[:, t] = v_sparse
             self.pseudo_values[t] = v_sparse.T @ sigma_t @ v_sparse
             
-            I_qq = np.eye(self.n_vars) - np.outer(q_t, q_t)
+            I_qq = np.eye(n_lagged_vars) - np.outer(q_t, q_t)
             sigma_t = I_qq @ sigma_t @ I_qq
             delta_t = delta_t @ I_qq
 
-        self.normal_baseline_T2, self.normal_baseline_SPE = self._calculate_all_contributions(X_scaled)
+        self.normal_baseline_T2, self.normal_baseline_SPE = self._calculate_all_contributions(X_lagged)
         print("离线建模完成。已建立双指标基准。")
 
     def compute_monitoring_stats(self, X_scaled):
@@ -150,7 +239,9 @@ class RNSPCA:
 
     def trigger_diagnose(self, X_scaled_fault):
         """故障诊断：计算 DCC 并判定根因"""
-        fault_cont_T2, fault_cont_SPE = self._calculate_all_contributions(X_scaled_fault)
+        # 1. 对故障数据应用同样的滑动窗口
+        X_fault_lagged = self._create_lagged_matrix(X_scaled_fault)
+        fault_cont_T2, fault_cont_SPE = self._calculate_all_contributions(X_fault_lagged)
         # DCC = np.abs(fault_cont_T2 - self.normal_baseline_T2)
         DCC = np.abs(fault_cont_SPE - self.normal_baseline_SPE)
         DCC_norm = DCC / (np.sum(DCC) + 1e-10)
