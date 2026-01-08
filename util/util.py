@@ -39,3 +39,18 @@ def get_latest_run_id():
                  if d.is_dir() and pattern.match(d.name)]
     
     return max(timestamps) if timestamps else None
+
+# --- 辅助函数：标准化名称 ---
+def normalize_name(val):
+    """
+    将输入值强制转换为字符串，并处理浮点数后缀。
+    例如: 
+    0 -> "0"
+    "0" -> "0"
+    0.0 -> "0"
+    "SensorA" -> "SensorA"
+    """
+    s = str(val)
+    if s.endswith('.0'):
+        return s[:-2]
+    return s

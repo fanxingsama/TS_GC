@@ -137,23 +137,8 @@ def analyze_root_cause_and_save(model_folder_path):
     print(f"成功: 最大生成树图片已保存至 {output_img_path}")
 
 def main():
-    # 1. 获取 ID (逻辑同 test_TS_GC.py)
-    # 你可以手动指定，也可以自动获取最新
-    # run_id = '01-05_11-23-56' 
     run_id = get_latest_run_id()
-    
-    if not run_id:
-        print("错误: 无法获取 run_id")
-        return
-
-    # 2. 构建基础路径
     base_path = Path('saved') / run_id
-    
-    if not base_path.exists():
-        print(f"错误: 文件夹不存在 {base_path}")
-        return
-
-    # 3. 执行分析
     analyze_root_cause_and_save(base_path)
 
 if __name__ == "__main__":

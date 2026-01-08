@@ -141,6 +141,52 @@ class MutiTS_GC(nn.Module):
         
         return predictions
     
+    def get_soft_mask(self, threshold_ratio=0.5, suppression_factor=0.1):
+        """
+        为模型的卷积层权重生成 “软掩码”
+        参数:
+        - threshold_ratio: 只有大于最大值 * ratio 的点才会被完全保留。
+        - suppression_factor: 非显著区域的梯度会被乘以这个因子 (0.0~1.0)。
+        """
+        gradient_masks = {}
+        device = next(self.parameters()).device # 获取模型所在的设备
+        
+        with torch.no_grad():
+            # 遍历每一个目标变量对应的子网络
+            for target_idx, net in enumerate(self.networks):
+                # 获取第一层卷积权重 [out_channels, series_num, kernel_size]
+                # 对输出通道取绝对值求和，得到 [series_num, kernel_size]
+                w_abs = net.first_conv.weight.abs().sum(dim=0)
+                
+                # 初始化掩码，默认值为抑制因子 (0.1)，代表“非关注区”
+                mask = torch.ones_like(w_abs) * suppression_factor 
+                
+                for source_idx in range(w_abs.shape[0]):
+                    # 获取该对变量 (Source -> Target) 的权重曲线
+                    w_curve = w_abs[source_idx]
+                    max_val = w_curve.max()
+                    
+                    # 如果最大权重太小，说明本身就没关系，忽略
+                    if max_val < 1e-6:
+                        continue
+                        
+                    # 动态阈值：保留大于最大值 50% 的所有峰值
+                    dynamic_thresh = max_val * threshold_ratio
+                    
+                    # 找到显著的时间点
+                    significant_indices = torch.where(w_curve > dynamic_thresh)[0]
+                    
+                    # 将这些显著点及其左右邻居的掩码设为 1.0 (全速学习)
+                    for idx in significant_indices:
+                        start = max(0, idx - 1)
+                        end = min(w_abs.shape[1], idx + 2)
+                        mask[source_idx, start:end] = 1.0
+                
+                # 保存掩码到对应设备
+                gradient_masks[target_idx] = mask.to(device)
+                
+        return gradient_masks
+    
     def get_first_layer_weights(self):
         all_weights = []
         for i in range(self.series_num):
