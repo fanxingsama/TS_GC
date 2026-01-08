@@ -348,13 +348,12 @@ def save_gc_matrix_to_csv(model, save_path, series_names, threshold=0.0, ignore_
     return True
 
 # 基于均值+标准差约束GC矩阵 (处理带名称的CSV)
-def constrain_with_std_dev(gc_csv_path, output_csv_path, series_names, std_multiplier=1.5):
+def constrain_with_hard_threshold(gc_csv_path, output_csv_path, series_names, threshold=0.004):
     series_num = len(series_names)
-    # 1. 创建映射字典时，统一使用标准化后的字符串 Key
+    # 1. 创建映射字典
     name_to_idx = {normalize_name(name): idx for idx, name in enumerate(series_names)}
     
-    # 2. 读取 CSV 时，强制前两列为字符串 (dtype=str)
-    # 这样 '0' 不会被变成 0.0, 'SensorA' 还是 'SensorA'
+    # 2. 读取 CSV
     try:
         gc_df = pd.read_csv(gc_csv_path, header=None, dtype={0: str, 1: str})
     except pd.errors.EmptyDataError:
@@ -363,61 +362,42 @@ def constrain_with_std_dev(gc_csv_path, output_csv_path, series_names, std_multi
 
     GC_weights = np.zeros((series_num, series_num))
     
-    # 3. 遍历解析
+    # 3. 遍历解析并填入矩阵 (保持原有的名称解析逻辑)
     for _, row in gc_df.iterrows():
-        # 读取并标准化
         source_name = normalize_name(row.iloc[0])
         target_name = normalize_name(row.iloc[1])
         weight = float(row.iloc[2])
         
-        # 4. 匹配
         if source_name in name_to_idx and target_name in name_to_idx:
             s_idx = name_to_idx[source_name]
             t_idx = name_to_idx[target_name]
             GC_weights[t_idx, s_idx] = weight
-        else:
-            # 调试信息：如果还是匹配不上，打印出来看看是啥
-            # print(f"跳过未知序列名称: {source_name} -> {target_name} (期望列表中的键: {list(name_to_idx.keys())[:5]}...)")
-            pass
 
     constrained_results = []
     
+    # 4. 直接根据阈值进行过滤
     for target_idx in range(series_num):
-        target_weights = []
-        source_indices = []
-        
         for source_idx in range(series_num):
-            if source_idx != target_idx and GC_weights[target_idx, source_idx] > 0:
-                target_weights.append(GC_weights[target_idx, source_idx])
-                source_indices.append(source_idx)
-        
-        if not target_weights:
-            continue
+            # 跳过自回归，且权重必须大于等于阈值
+            if source_idx != target_idx:
+                weight = GC_weights[target_idx, source_idx]
+                
+                # === 核心修改逻辑在这里 ===
+                if weight >= threshold: 
+                    constrained_results.append({
+                        'source': series_names[source_idx],
+                        'target': series_names[target_idx],
+                        'strength': weight
+                    })
 
-        weights_arr = np.array(target_weights)
-        mean_weight = np.mean(weights_arr)
-        std_weight = np.std(weights_arr)
-        
-        threshold = mean_weight + std_multiplier * std_weight
-
-        for k, weight in enumerate(target_weights):
-            if weight >= threshold:
-                src_idx = source_indices[k]
-                constrained_results.append({
-                    'source': series_names[src_idx], # 存入文件时使用原始名称
-                    'target': series_names[target_idx],
-                    'strength': weight
-                })
-
+    # 5. 保存结果
     if constrained_results:
         constrained_df = pd.DataFrame(constrained_results)
         constrained_df = constrained_df.sort_values(['source', 'target'])
         constrained_df.to_csv(output_csv_path, index=False, header=False)
-        print(f"约束后的GC矩阵(带名称)已保存至: {output_csv_path}")
+        print(f"硬约束后的GC矩阵(阈值>={threshold})已保存至: {output_csv_path}")
     else:
-        pd.DataFrame(columns=['source', 'target', 'strength']).to_csv(
-            output_csv_path, index=False, header=False)
-        print("无满足条件的因果关系，已创建空文件。")
+        print(f"无满足条件(>={threshold})的因果关系")
 
 def main(model_path):
     # 检查 SERIES_NAME 是否存在
@@ -433,7 +413,7 @@ def main(model_path):
     res = save_gc_matrix_to_csv(model, gc_predict_path, SERIES_NAME, threshold=0.0, ignore_self_causality=True, is_softmax=False)
     
     if res:
-        constrain_with_std_dev(gc_predict_path, gc_constrain_path, SERIES_NAME, std_multiplier=0.3)
+        constrain_with_hard_threshold(gc_predict_path, gc_constrain_path, SERIES_NAME, threshold=0.004)
         plot_gc_triple_compare(gc_predict_path, gc_constrain_path, SERIES_NAME, GC_predict_img_path, true_csv_path=GC_PATH, show_weights=True)
         prediction_compare(model, X_DATA, Y_DATA, SERIES_NAME, save_path=model_path)
         save_causal_links(csv_path=gc_constrain_path, img_save_path=causal_links_path, series_names=SERIES_NAME)
