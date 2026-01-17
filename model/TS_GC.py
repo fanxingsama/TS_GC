@@ -17,9 +17,9 @@ class SelectLastTimeStep(nn.Module):
         # x: [batch_size, feature_dim, seq_len]
         return x[:, :, -1] # [batch_size, feature_dim]
 
-class TS_GC(nn.Module):
+class TSNet(nn.Module):
     def __init__(self, series_num, feature_dim, temporal_layers, kernel_size, dropout, output_window):
-        super(TS_GC, self).__init__()
+        super(TSNet, self).__init__()
         self.first_conv = nn.Conv1d(series_num, feature_dim, kernel_size, padding=kernel_size//2)
         
         # 时间层
@@ -87,10 +87,10 @@ class TS_GC(nn.Module):
     def get_first_conv_weights(self):
         return self.first_conv.weight
 
-class MutiTS_GC(nn.Module):
+class TS_GC(nn.Module):
     def __init__(self, input_window, output_window, series_num,
                  feature_dim, temporal_layers, kernel_size, dropout, device):
-        super(MutiTS_GC, self).__init__()
+        super(TS_GC, self).__init__()
         self.input_window = input_window
         self.output_window = output_window
         self.series_num = series_num 
@@ -110,7 +110,7 @@ class MutiTS_GC(nn.Module):
         self.networks = nn.ModuleList()
         for i in range(self.series_num):
             self.networks.append(
-                TS_GC(
+                TSNet(
                     series_num=self.series_num,
                     feature_dim=feature_dim,
                     temporal_layers=temporal_layers,

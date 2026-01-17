@@ -32,12 +32,10 @@ def hierarchy_pos(G, root=None, width=1., vert_gap=0.2, vert_loc=0, xcenter=0.5)
                                  vert_loc=vert_loc-vert_gap, xcenter=nextx))
     return pos
 
+# 构建最大生成树
 def analyze_root_cause_and_save(model_folder_path):
-    """
-    读取指定文件夹下的 GC_matrix_constrained.csv，构建最大生成树并保存图片
-    """
     # 1. 构建路径
-    input_csv_path = model_folder_path / "GC_matrix_constrained.csv"
+    input_csv_path = model_folder_path / "GC_matrix.csv"
     output_img_path = model_folder_path / "root_cause_max_tree.png"
 
     print(f"正在处理文件: {input_csv_path}")
@@ -94,18 +92,28 @@ def analyze_root_cause_and_save(model_folder_path):
 
     # --- 布局选择 ---
     try:
-        # 尝试使用分层树状布局
         pos = hierarchy_pos(mst, root=root)
     except Exception:
-        # 失败则回退到 spring 布局
         pos = nx.spring_layout(mst, seed=42, k=2.0)
 
-    # 绘制边 (带弯曲)
-    nx.draw_networkx_edges(mst, pos, edge_color='gray', arrowstyle='-|>', arrowsize=20, 
-                           alpha=0.6, connectionstyle='arc3,rad=0.05')
+    # 绘制节点 (先定义节点大小，后面要用到)
+    node_size = 1500 
 
     # 绘制节点
-    nx.draw_networkx_nodes(mst, pos, node_size=1500, node_color='#E8F6F3', edgecolors='#1ABC9C')
+    nx.draw_networkx_nodes(mst, pos, node_size=node_size, node_color='#E8F6F3', edgecolors='#1ABC9C')
+
+    # 绘制边 (关键修改：加入 node_size 和 arrows=True)
+    nx.draw_networkx_edges(
+        mst, 
+        pos, 
+        node_size=node_size,  # <--- 【关键】告诉画边的函数节点有多大，它会自动缩短边
+        edge_color='gray', 
+        arrowstyle='-|>',     # 箭头样式
+        arrowsize=20,         # 箭头大小
+        arrows=True,          # 显式开启箭头
+        alpha=0.6, 
+        connectionstyle='arc3,rad=0.05'
+    )
 
     # 绘制节点标签
     nx.draw_networkx_labels(mst, pos, font_size=11, font_weight='bold', font_color='#2C3E50')
@@ -137,8 +145,23 @@ def analyze_root_cause_and_save(model_folder_path):
     print(f"成功: 最大生成树图片已保存至 {output_img_path}")
 
 def main():
-    run_id = get_latest_run_id()
+    # 1. 获取 ID (逻辑同 test_TS_GC.py)
+    # 你可以手动指定，也可以自动获取最新
+    run_id = 'T2_high' 
+    # run_id = get_latest_run_id()
+    
+    if not run_id:
+        print("错误: 无法获取 run_id")
+        return
+
+    # 2. 构建基础路径
     base_path = Path('saved') / run_id
+    
+    if not base_path.exists():
+        print(f"错误: 文件夹不存在 {base_path}")
+        return
+
+    # 3. 执行分析
     analyze_root_cause_and_save(base_path)
 
 if __name__ == "__main__":

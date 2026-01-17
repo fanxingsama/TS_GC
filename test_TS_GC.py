@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 import pandas as pd
 from config import * # 确保这里面包含了 SERIES_NAME
-from model.TS_GC import MutiTS_GC
+from model.TS_GC import TS_GC
 import os
 from util.plot_causal_link import save_causal_links
 from util.util import get_latest_run_id, normalize_name
@@ -24,7 +24,7 @@ def load_model(model_path, device):
 
     saved_config = joblib.load(config_path)
     
-    model = MutiTS_GC(
+    model = TS_GC(
         input_window=saved_config['input_window'],
         output_window=saved_config['output_window'],
         series_num=saved_config['series_num'],

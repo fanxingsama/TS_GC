@@ -4,8 +4,8 @@ import os
 import sys
 
 # === 配置区域 ===
-csv_file_path = 'high_fault_重复.csv'  # 在这里修改你的CSV文件路径
-output_folder = 'high_fault_重复'   # 图片保存的文件夹名称
+csv_file_path = 'low_fault_重复.csv'  # 在这里修改你的CSV文件路径
+output_folder = 'low_fault_重复'   # 图片保存的文件夹名称
 points_to_plot = None            # 选择画多少个点
 # ================
 
@@ -32,7 +32,7 @@ def visualize_sensors(file_path, save_dir, limit=1000):
         # 4. 设置绘图风格和字体（防止中文乱码）
         plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial'] # 用来正常显示中文标签
         plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
-        plt.style.use('bmh') # 使用一种比较好看的图表风格
+        plt.style.use('default') # 使用一种比较好看的图表风格
 
         columns = df.columns
         total_cols = len(columns)

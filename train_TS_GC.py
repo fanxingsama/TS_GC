@@ -11,14 +11,15 @@ from config import *
 import matplotlib.pyplot as plt
 
 from util.logger import get_logger, setup_logging
-from model.TS_GC import MutiTS_GC
+from model.TS_GC import TS_GC
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
-# ISTA算法的硬截断，使用软阈值算子 (Soft Thresholding) 把小的权重直接“归零”
+# 软阈值算子优化，由于结构化正则化（如 $L_1$ 范数）在 0 点处不可导，传统的 Adam 或 SGD 优化器无法产生精确的 0 值，所以这里要用ISTA，使用软阈值算子 (Soft Thresholding) 把小的权重直接“归零”，用来优化非光滑问题
 def PGD_update(network, lam, lr, penalty):
     hidden, p, lag = network.shape
+    # torch.norm(network, dim=(0, 2))：计算特定输入变量对目标变量影响的整体强度
     if penalty == 'GL': # 组Loss惩罚
         norm = torch.norm(network, dim=(0, 2), keepdim=True) # 得到每一列的L2范数
         # torch.clamp把norm的值限制如果小于lr * lam，就变成lr * lam
@@ -41,15 +42,16 @@ def PGD_update(network, lam, lr, penalty):
     else:
         raise ValueError('unsupported penalty: %s' % penalty)
     
-# 稀疏惩罚的结果
+# 结构化稀疏正则化，强迫模型在学习时进行“优胜劣汰”
 def lasso_penalty(network, lam, penalty):
     hidden, p, lag = network.shape
+    # torch.norm(network, dim=(0, 2))：计算特定输入变量对目标变量影响的整体强度
     if penalty == 'GL': # 组Loss惩罚
         return lam * torch.sum(torch.norm(network, dim=(0, 2)))
-    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚
+    elif penalty == 'GSGL': # 组稀疏组Lasso惩罚，在组的基础上增加更细粒度的控制，既希望筛选出哪些变量有因果关系，又希望在有关系的变量中剔除不显著的时间点
         return lam * (torch.sum(torch.norm(network, dim=(0, 2)))
                       + torch.sum(torch.norm(network, dim=0)))
-    elif penalty == 'H': # 层次Lasso惩罚
+    elif penalty == 'H': # 层次Lasso惩罚，针对时序特征最强的约束。它要求如果滞后 1 秒没有关系，那么滞后 2 秒也应该没关系，保证了时间上的连续性和物理一致性
         return lam * sum([torch.sum(torch.norm(network[:, :, :(i+1)], dim=(0, 2)))
                           for i in range(lag)])
     else:
@@ -91,10 +93,11 @@ class TS_GC_Trainer:
         for ista_iter in range(self.epochs):
             current_smooth_loss, total_mse_loss, ridge_loss_val = self._compute_smooth_loss(self.X_full, self.Y_full)
 
-            # 2. Backward pass for the smooth part
+            # 2. 梯度计算
             self.model.zero_grad()
             current_smooth_loss.backward()
 
+            # 手动梯度下降
             with torch.no_grad():
                 for param in self.model.parameters():
                     if param.grad is not None:
@@ -269,7 +272,7 @@ def main():
     setup_logging(save_dir)
     train_logger = get_logger() # 日志记录器
     
-    model = MutiTS_GC(
+    model = TS_GC(
         input_window=INPUT_WINDOW,
         output_window=OUTPUT_WINDOW,
         series_num=SERIES_NUM,
