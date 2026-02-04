@@ -71,10 +71,9 @@ class RNSPCA:
         self.normal_baseline_SPE = None   # 正常工况SPE贡献度基准
         self.n_original_vars = None # 记录原始变量数
 
-    
+    # 时序嵌入
     def _create_lagged_matrix(self, X):
         """
-        构造时间滞后矩阵 (Sliding Window Stacking)
         输入 shape: (samples, features)
         输出 shape: (samples - window + 1, features * window)
         """
@@ -96,27 +95,6 @@ class RNSPCA:
         # 水平拼接
         X_lagged = np.hstack(new_features)
         return X_lagged
-    
-    # def _compute_hsic_matrix(self, X):
-    #     """核相关矩阵计算，捕捉特征间的非线性相关关系"""
-    #     n_samples, n_vars = X.shape
-    #     H = np.eye(n_samples) - (1.0 / n_samples) * np.ones((n_samples, n_samples))
-    #     K_list = []
-    #     # 为每个特征生成中心化的高斯核矩阵，是 HSIC 计算的基础
-    #     for i in range(n_vars):
-    #         print(f"正在生成高斯核矩阵: 变量 {i+1}/{n_vars}...")
-    #         xi = X[:, i].reshape(-1, 1)
-    #         dist = squareform(pdist(xi, 'sqeuclidean')) # 计算平方欧氏距离矩阵
-    #         Ki = np.exp(-dist / (2 * self.sigma**2))
-    #         K_list.append(H @ Ki @ H)
-        
-    #     hsic_matrix = np.zeros((n_vars, n_vars))
-    #     for i in range(n_vars):
-    #         print(f"正在计算HSIC矩阵: 协方差矩阵 {i+1}/{n_vars}...")
-    #         for j in range(i, n_vars):
-    #             score = np.trace(K_list[i] @ K_list[j]) / (n_samples - 1)**2
-    #             hsic_matrix[i, j] = hsic_matrix[j, i] = score
-    #     return hsic_matrix
     
     # HSIC矩阵计算，捕捉特征间的非线性相关关系
     def _compute_hsic_matrix(self, X):
@@ -148,7 +126,8 @@ class RNSPCA:
                 
         print("\nHSIC 矩阵计算完成。")
         return hsic_matrix
-
+    
+    # 贡献度计算
     def _calculate_all_contributions(self, X_scaled):
         """贡献度计算：分解 T2 和 SPE 到各个维度"""
         lambda_inv = np.diag(1.0 / (self.pseudo_values + 1e-10))

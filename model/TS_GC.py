@@ -49,7 +49,7 @@ class TSNet(nn.Module):
         self.feature_fusion = nn.Sequential(
             nn.AdaptiveAvgPool1d(1), # 输出: [batch_size, feature_dim, 1] (假设输入是 [batch_size, feature_dim, seq_len])
             nn.Flatten(), # 输出: [batch_size, feature_dim]
-            nn.Linear(feature_dim, feature_dim), # 输出: [batch_size, feature_dim]
+            nn.Linear(feature_dim, feature_dim), # 输出: [batch_size, feature_dim] 
             nn.PReLU(),
             nn.Dropout(dropout)
         )
