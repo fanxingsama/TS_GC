@@ -104,7 +104,6 @@ def prediction_compare(model, X_data, Y_data, series_names, save_path=None, poin
     return mae, mse
 
 # 绘制三个格兰杰因果图的对比：真实、预测、约束后
-# 绘制三个格兰杰因果图的对比：真实、预测、约束后
 def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, save_path, true_csv_path=None, show_weights=True):
     """
     基于 test_test.py 的绘图逻辑修改，增加了对序列名称的支持。

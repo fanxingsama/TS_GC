@@ -42,7 +42,6 @@ def save_causal_links(csv_path, img_save_path=None, series_names=None):
     pos = nx.spring_layout(G, k=0.8, iterations=50, seed=42) 
 
     plt.figure(figsize=(12, 10))
-    ax = plt.gca()
     
     # 4. 节点样式设计
     # 计算每个节点的度 (入度+出度)，用于决定节点大小和颜色
@@ -97,5 +96,14 @@ def save_causal_links(csv_path, img_save_path=None, series_names=None):
         os.makedirs(os.path.dirname(img_save_path), exist_ok=True)
         plt.savefig(img_save_path, dpi=300, bbox_inches='tight')
         print(f"美化因果图已保存至: {img_save_path}")
+    else:
+        plt.show()
+    
     
     plt.close()
+    
+
+csv_path = "data/GC_predict.csv"
+series_names = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6']
+
+save_causal_links(csv_path = csv_path,  img_save_path = None , series_names = series_names)

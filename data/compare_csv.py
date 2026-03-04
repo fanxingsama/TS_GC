@@ -1,7 +1,9 @@
 import pandas as pd
 import os
 
-def compare_csv_points(file1_path, file2_path, output_path="comparison_result.txt", save_duplicates=False):
+# 合并两个csv文件里相同的测点数据，用来一次性处理数据，然后全部csv文件使用
+
+def compare_csv_points(file1_path, file2_path, save_duplicates=False):
     """
     对比两个CSV文件中的测点。
     
@@ -69,7 +71,7 @@ def main():
     # 示例用法
     # True -> 保存两个CSV文件中的重复测点数据
     # False -> 仅输出对比报告
-    compare_csv_points("fault_重复.csv", "TIC_1101高波动.csv", save_duplicates=True)
+    compare_csv_points("TIC_1101低波动.csv", "TIC_1101正常.csv", save_duplicates=True)
 
 if __name__ == "__main__":
     main()

@@ -2,10 +2,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import sys
+from matplotlib import rcParams
+
+rcParams['font.family'] = 'SimHei'
+rcParams['axes.unicode_minus'] = False
 
 # === 配置区域 ===
-csv_file_path = 'low_fault_重复.csv'  # 在这里修改你的CSV文件路径
-output_folder = 'low_fault_重复'   # 图片保存的文件夹名称
+csv_file_path = 'virtual/time_series_nonlinear.csv'  # 在这里修改你的CSV文件路径
+output_folder = '非线性测试'   # 图片保存的文件夹名称
 points_to_plot = None            # 选择画多少个点
 # ================
 

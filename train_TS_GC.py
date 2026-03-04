@@ -293,7 +293,7 @@ def main():
         series_num=SERIES_NUM,
         X_full=X_DATA,
         Y_full=Y_DATA,
-        logger=train_logger,
+        # logger=train_logger,
         penalty_type=PENALTY_TYPE,
         lasso_param=LASSO_PARAM,
         ridge_param=RIDGE_PARAM,
@@ -327,6 +327,21 @@ def main():
 )
 
     train_logger.info(log_message)
+    
+        # ========== 新增：训练完成后调用测试和根因分析 ==========
+    print("\n" + "="*50)
+    print("训练完成，开始执行测试...")
+    print("="*50)
+    # 导入测试模块
+    from test_TS_GC import main as test_main
+    test_main(save_dir)  # 执行测试
+    
+    # print("\n" + "="*50)
+    # print("测试完成，开始根因分析...")
+    # print("="*50)
+    # # 导入根因分析模块
+    # from max_tree import analyze_root_cause_and_save
+    # analyze_root_cause_and_save(save_dir)  # 执行根因分析
     
 if __name__ == '__main__':
     main()
