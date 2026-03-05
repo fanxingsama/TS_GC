@@ -76,13 +76,21 @@ X, beta, GC = simulate_nonlinear_var(
     seed=seed
 ) 
 
-# 保存 CSV
-df = pd.DataFrame(np.round(X, 3), columns=[f'{i}' for i in range(series_num)])
+# ========== 关键修改1：时序数据CSV列名改为x0、x1... ==========
+df = pd.DataFrame(np.round(X, 3), columns=[f'x{i}' for i in range(series_num)])
 df.to_csv('time_series_nonlinear.csv', index=False)
+print(f"时序数据已保存到 time_series_nonlinear.csv")
 
-# 提取和保存因果关系
-granger_causes = [[j, i, 1] for i in range(series_num) for j in range(series_num) if GC[i, j] == 1]
+# ========== 关键修改2：因果关系CSV中变量名改为x0、x1... ==========
+# 替换原granger_causes生成逻辑，将数字编号改为x开头
+granger_causes = [
+    [f'x{j}', f'x{i}', 1]  # j是因变量编号，i是果变量编号，都改为x前缀
+    for i in range(series_num) 
+    for j in range(series_num) 
+    if GC[i, j] == 1
+]
 pd.DataFrame(granger_causes).to_csv('causality_nonlinear.csv', index=False, header=False)
+print(f"因果关系已保存到 causality_nonlinear.csv")
 
 print(f"非线性数据已生成。形状: {X.shape}")
 print(f"数据质量检查 (Mean/Std): {X.mean():.3f} / {X.std():.3f}")

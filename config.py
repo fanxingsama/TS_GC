@@ -7,21 +7,21 @@ import os
 # DATA_PATH = os.path.join('data', 'virtual','simu_data', 'series_data2.csv')
 # GC_PATH = os.path.join('data', 'virtual', 'simu_data', 'granger_causality2.csv')
 
-# DATA_PATH = os.path.join('data', 'data_use.csv')
-# GC_PATH = None
+# DATA_PATH = os.path.join('data', 'virtual','fMRI', 'timeseries6.csv')
+# GC_PATH = os.path.join('data', 'virtual', 'fMRI', 'sim6_gt_processed.csv')
 
-DATA_PATH = os.path.join('data', 'virtual','fMRI', 'timeseries6.csv')
-GC_PATH = os.path.join('data', 'virtual', 'fMRI', 'sim6_gt_processed.csv')
+# DATA_PATH = os.path.join('data','virtual', 'time_series_linear.csv')
+# GC_PATH = os.path.join('data','virtual', 'causal_relations.csv')
 
-# DATA_PATH = os.path.join('data', 'potential_var.csv')
-# GC_PATH = None
+DATA_PATH = os.path.join('data','virtual', 'time_series_nonlinear.csv')
+GC_PATH = os.path.join('data','virtual', 'causality_nonlinear.csv')
 
 INPUT_WINDOW = 5
 OUTPUT_WINDOW = 1
 
 # 训练参数
 LR = 0.01      
-LASSO_PARAM = 0.02
+LASSO_PARAM = 0.035
 RIDGE_PARAM = 0.001
 PENALTY_TYPE = 'H' # 'GSGL'和'GL'
 KERNAL_SIZE = 5    
