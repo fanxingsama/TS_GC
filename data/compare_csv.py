@@ -71,7 +71,7 @@ def main():
     # 示例用法
     # True -> 保存两个CSV文件中的重复测点数据
     # False -> 仅输出对比报告
-    compare_csv_points("TIC_1101低波动.csv", "TIC_1101正常.csv", save_duplicates=True)
+    compare_csv_points("增压机故障/增压机出口阀关闭.csv", "主提升管异常/TIC_1101低波动.csv", save_duplicates=True)
 
 if __name__ == "__main__":
     main()

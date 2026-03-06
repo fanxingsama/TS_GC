@@ -8,8 +8,8 @@ rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
 # === 配置区域 ===
-csv_file_path = 'virtual/time_series_nonlinear.csv'  # 在这里修改你的CSV文件路径
-output_folder = '非线性测试'   # 图片保存的文件夹名称
+csv_file_path = '增压机故障/增压机出口阀关闭_重复数据.csv'  # 在这里修改你的CSV文件路径
+output_folder = './增压机故障/出口阀关闭无SIS图片保存'   # 图片保存的文件夹名称
 points_to_plot = None            # 选择画多少个点
 # ================
 
@@ -25,9 +25,7 @@ def visualize_sensors(file_path, save_dir, limit=1000):
         print(f"已创建文件夹：{save_dir}")
 
     try:
-        # 3. 读取数据 (只读取前 limit 行，加快速度)
         print("正在读取CSV文件...")
-        # encoding='utf-8' 如果报错可以改成 'gbk'
         df = pd.read_csv(file_path, nrows=limit, encoding='utf-8') 
         
         # 尝试将所有列转换为数值型，无法转换的变为NaN
@@ -54,9 +52,9 @@ def visualize_sensors(file_path, save_dir, limit=1000):
             # 绘制折线图
             plt.plot(df.index, df[col_name], linewidth=1.5)
             
-            plt.title(f"测点: {col_name}", fontsize=12)
-            plt.xlabel("前 10000 个采样点")
-            plt.ylabel("值")
+            plt.title(f"{col_name}", fontsize=12)
+            # plt.xlabel("pot")
+            plt.ylabel("Value")
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
 
