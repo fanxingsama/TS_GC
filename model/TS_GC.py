@@ -18,9 +18,12 @@ class SelectLastTimeStep(nn.Module):
         return x[:, :, -1] # [batch_size, feature_dim]
 
 class TSNet(nn.Module):
-    def __init__(self, series_num, feature_dim, temporal_layers, kernel_size, dropout, output_window):
+    def __init__(self, series_num, feature_dim, temporal_layers, kernel_size, dropout, output_window, use_temporal=True, use_spatial=True, use_residual=True):
         super(TSNet, self).__init__()
         self.first_conv = nn.Conv1d(series_num, feature_dim, kernel_size, padding=kernel_size//2)
+        self.use_temporal = use_temporal
+        self.use_spatial = use_spatial
+        self.use_residual = use_residual
         
         # 时间层
         self.temporal_layers = nn.ModuleList()
@@ -62,25 +65,34 @@ class TSNet(nn.Module):
         )
     
     def forward(self, x):
-        # x: [batch_size, series_num, input_window]
-        origin_features = self.first_conv(x) # origin_features: [batch_size, feature_dim, input_window]
-        origin_features = F.relu(origin_features) # origin_features: [batch_size, feature_dim, input_window]
+        origin_features = self.first_conv(x) 
+        origin_features = F.relu(origin_features)
         
-        time_features = origin_features # time_features: [batch_size, feature_dim, input_window]
-        for temporal_layer in self.temporal_layers:
-            residual = time_features # residual: [batch_size, feature_dim, input_window]
-            time_features = temporal_layer(time_features) # time_features: [batch_size, feature_dim, input_window]
-            time_features = time_features + residual # time_features: [batch_size, feature_dim, input_window]
+        # --- 1. 时间层消融 ---
+        if self.use_temporal:
+            time_features = origin_features 
+            for temporal_layer in self.temporal_layers:
+                residual = time_features 
+                time_features = temporal_layer(time_features) 
+                time_features = time_features + residual 
+        else:
+            time_features = origin_features # 跳过时间卷积，直接传递
+
+        # --- 2. 空间层消融 ---
+        if self.use_spatial:
+            space_features = self.spatial_processor(origin_features) 
+            combined_features = time_features + space_features 
+        else:
+            combined_features = time_features # 跳过空间特征，仅保留时间特征
         
-        space_features = self.spatial_processor(origin_features) # space_features: [batch_size, feature_dim, 1]
-        # space_features 广播到 time_features 的形状
-        combined_features = time_features + space_features # combined_features: [batch_size, feature_dim, input_window] (通过广播)
-        
-        # combined 的计算方式也依赖于上述的维度对齐
-        combined = 0.5 * origin_features + 0.5 * combined_features # combined: [batch_size, feature_dim, input_window]
-        
-        fused_features = self.feature_fusion(combined) # fused_features: [batch_size, feature_dim]
-        prediction = self.prediction_head(fused_features) # prediction: [batch_size, output_window]
+        # --- 3. 原始特征融合(残差)消融 ---
+        if self.use_residual:
+            combined = 0.5 * origin_features + 0.5 * combined_features 
+        else:
+            combined = combined_features # 放弃与最底层特征融合
+
+        fused_features = self.feature_fusion(combined) 
+        prediction = self.prediction_head(fused_features) 
         
         return prediction
     
@@ -89,7 +101,7 @@ class TSNet(nn.Module):
 
 class TS_GC(nn.Module):
     def __init__(self, input_window, output_window, series_num,
-                 feature_dim, temporal_layers, kernel_size, dropout, device):
+                 feature_dim, temporal_layers, kernel_size, dropout, device, use_temporal=True, use_spatial=True, use_residual=True):
         super(TS_GC, self).__init__()
         self.input_window = input_window
         self.output_window = output_window
@@ -104,7 +116,10 @@ class TS_GC(nn.Module):
             'feature_dim': feature_dim,
             'temporal_layers': temporal_layers,
             'kernel_size': kernel_size,
-            'dropout': dropout
+            'dropout': dropout,
+            'use_temporal': use_temporal, # 新增
+            'use_spatial': use_spatial,   # 新增
+            'use_residual': use_residual  # 新增
         }
         
         self.networks = nn.ModuleList()
@@ -116,7 +131,10 @@ class TS_GC(nn.Module):
                     temporal_layers=temporal_layers,
                     kernel_size=kernel_size,
                     dropout=dropout,
-                    output_window=self.output_window 
+                    output_window=self.output_window,
+                    use_temporal=use_temporal, # 新增
+                    use_spatial=use_spatial,   # 新增   
+                    use_residual=use_residual, # 新增
                 )
             )
 

@@ -33,6 +33,11 @@ APPLY_MASK = False
 LOSS_FUNCTION = torch.nn.MSELoss()
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# --- 新增：消融实验配置 (Ablation Settings) ---
+USE_TEMPORAL = True   # 是否使用多尺度时间层
+USE_SPATIAL = True    # 是否使用全局空间池化层
+USE_RESIDUAL = True   # 是否在最终特征中融合第一层原始特征的残差
+
 
 # 加载数据
 X_DATA, Y_DATA, SERIES_NUM, SERIES_NAME = create_data(DATA_PATH, INPUT_WINDOW, OUTPUT_WINDOW)

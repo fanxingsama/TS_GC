@@ -32,7 +32,10 @@ def load_model(model_path, device):
         temporal_layers=saved_config['temporal_layers'],
         kernel_size=saved_config['kernel_size'],
         dropout=saved_config['dropout'],
-        device=device 
+        device=device,
+        use_temporal=saved_config.get('use_temporal', True), 
+        use_spatial=saved_config.get('use_spatial', True),
+        use_residual=saved_config.get('use_residual', True)
     ).to(device)
 
     model.load_state_dict(torch.load(model_weight_path, map_location=device, weights_only=True))

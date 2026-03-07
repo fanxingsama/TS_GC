@@ -49,6 +49,11 @@ def generate_merged_equations_data(p=8, T=1000, lag=3, sd=0.1, seed=0):
         x[:, t] += errors[:, t-1]
     
     x_final = x.T[burn_in:]
+    
+    # 加上这两行标准化处理：
+    from sklearn.preprocessing import StandardScaler
+    x_final = StandardScaler().fit_transform(x_final)
+    
     pd.DataFrame(np.round(x_final, 3), columns=[f'x{i}' for i in range(p)]).to_csv('time_series_linear.csv', index=False)
     
     # 4. 提取信息、生成公式并保存到日志和 CSV

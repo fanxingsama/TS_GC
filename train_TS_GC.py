@@ -280,7 +280,10 @@ def main():
         temporal_layers=TEMPORAL_LAYERS,
         kernel_size=KERNAL_SIZE,
         dropout=DROUP_OUT,
-        device=DEVICE
+        device=DEVICE,
+        use_temporal=USE_TEMPORAL, # 引入消融参数
+        use_spatial=USE_SPATIAL,   # 引入消融参数
+        use_residual=USE_RESIDUAL  # 引入消融参数
     ).to(DEVICE)
 
     trainer = TS_GC_Trainer(
@@ -324,6 +327,10 @@ def main():
     f"  - penalty: {PENALTY_TYPE}\n"
     f"  - Lasso 参数: {LASSO_PARAM}\n"
     f"  - 序列数量: {SERIES_NUM}\n"
+    f"模型架构消融:\n"
+    f"  - 是否使用时间层 (USE_TEMPORAL): {USE_TEMPORAL}\n"
+    f"  - 是否使用空间层 (USE_SPATIAL): {USE_SPATIAL}\n"
+    f"  - 是否保留原始残差 (USE_RESIDUAL): {USE_RESIDUAL}\n"
 )
 
     train_logger.info(log_message)
