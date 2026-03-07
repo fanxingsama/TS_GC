@@ -34,3 +34,8 @@ class Config:
     # ==========================================
     DIAGNOSE_TOP_K = 10    
     # 已移除 STAT_TYPE = 'SPE' 参数，当前系统默认仅计算和使用 SPE
+    
+    # 贡献度计算模式:
+    #   'spe'      - 传统SPE贡献度（标准化空间，对MAD小的变量敏感）
+    #   'combined'  - 融合SPE贡献度与原始空间相对变化率（对真实突变更敏感）
+    CONTRIB_MODE = 'combined'

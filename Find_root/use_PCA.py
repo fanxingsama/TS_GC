@@ -17,6 +17,7 @@ def diagnose_from_csv(config):
     model_path = config.MODEL_SAVE_PATH
     top_k = config.DIAGNOSE_TOP_K
     root_save_dir = config.RESULT_SAVE_DIR
+    contrib_mode = getattr(config, 'CONTRIB_MODE', 'spe')
     
     current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     save_dir = os.path.join(root_save_dir, f"{current_time}")
@@ -40,6 +41,7 @@ def diagnose_from_csv(config):
     # 数据预处理
     df_test = pd.read_csv(file_path)
     feature_names = df_test.columns.tolist()
+    X_raw = df_test.values.astype(float)
     
     if denoiser is not None:
         print(">>> 检测到模型包含小波降噪器，正在进行降噪...")
@@ -55,18 +57,24 @@ def diagnose_from_csv(config):
     plot_global_anomaly(stat_scores, threshold, output_line_path)
     
     # 2. 诊断计算 (变量贡献度)
-    diag_res = model.trigger_diagnose(X_test_scaled)
+    print(f">>> 贡献度计算模式: {contrib_mode}")
+    if contrib_mode == 'combined':
+        normal_median = scaler.median
+        diag_res = model.trigger_diagnose(X_test_scaled, mode='combined',
+                                           X_raw_fault=X_raw,
+                                           X_raw_normal_median=normal_median)
+    else:
+        diag_res = model.trigger_diagnose(X_test_scaled, mode='spe')
+    
     dcc_scores = diag_res['dcc_norm']
     
     # 异常变量筛选
     sorted_indices = np.argsort(dcc_scores)[::-1]
     save_indices = sorted_indices[:top_k]
     
-    # ============== 新增: 绘制筛选出的各个异常变量随时间的分数及阈值 ==============
-    # 获取测试集上所有变量的时间序列异常分数
+    # ============== 绘制筛选出的各个异常变量随时间的分数及阈值 ==============
     var_spe_series = model.get_variable_spe_series(X_test_scaled)
     
-    # 创建专门存放单变量趋势图的文件夹
     var_trend_dir = os.path.join(save_dir, 'variable_trends')
     os.makedirs(var_trend_dir, exist_ok=True)
     
@@ -74,19 +82,16 @@ def diagnose_from_csv(config):
         name = feature_names[idx] if idx < len(feature_names) else f"Var_{idx}"
         series = var_spe_series[:, idx]
         
-        # 获取该变量对应的异常阈值
         var_thresholds = getattr(model, 'var_SPE_thresholds', None) 
         
         plt.figure(figsize=(12, 4))
-        # 加上 zorder=4 确保折线画在背景色带的上方
-        plt.plot(series, label=f'{name} Anomaly Score', color='#1f77b4', linewidth=1.5, zorder=4)
+        plt.plot(series, label=f'变量异常分数', color='#1f77b4', linewidth=1.5, zorder=4)
         
         if var_thresholds is not None:
             var_thresh = var_thresholds[idx]
             plt.axhline(var_thresh, color='red', linestyle='--', linewidth=2, 
                         label=f'Threshold ({var_thresh:.4f})', zorder=5)
             
-            # ======== 新增：为每个变量单独计算并绘制背景颜色分区 ========
             is_anomaly = np.nan_to_num(series) > var_thresh
             diff = np.diff(is_anomaly.astype(int))
             change_points = np.where(diff != 0)[0] + 1
@@ -96,35 +101,30 @@ def diagnose_from_csv(config):
                 start = split_indices[j]
                 end = split_indices[j+1]
                 if is_anomaly[start]:
-                    plt.axvspan(start, end, color='lightcoral', alpha=0.2, label='Anomaly Zone')
+                    plt.axvspan(start, end, color='lightcoral', alpha=0.2)
                 else:
-                    plt.axvspan(start, end, color='lightskyblue', alpha=0.2, label='Normal Zone')
-            # ==============================================================
+                    plt.axvspan(start, end, color='lightskyblue', alpha=0.2)
             
-        plt.title(f'Rank {rank+1} Anomalous Variable Trend: {name}')
-        plt.xlabel('Time Step')
-        plt.ylabel('SPE Score')
+        plt.title(f'{name}')
+        plt.xlabel('时间步')
+        plt.ylabel('异常分数')
         
-        # 使用字典去重机制，防止图例中出现多个重复的 "Anomaly Zone" / "Normal Zone"
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
         plt.legend(by_label.values(), by_label.keys(), loc='upper left')
         
-        # 添加网格线让图表更清晰
         plt.grid(True, linestyle=':', alpha=0.4)
         plt.tight_layout()
         
-        # 保存图片
         save_path = os.path.join(var_trend_dir, f'rank_{rank+1}_{name.replace("/", "_")}.png')
         plt.savefig(save_path, dpi=150)
         plt.close()
         
     print(f">>> 单个异常变量的时间趋势图已保存至: {var_trend_dir}")
-    # ========================================================================
     
     # --- 终端输出 ---
     print("\n" + "="*45)
-    print(f"【诊断报告】 提取 Top {top_k} 变量")
+    print(f"【诊断报告】 提取 Top {top_k} 变量 (模式: {contrib_mode})")
     print(f"{'排名':<6} | {'变量索引':<10} | {'变量名称':<20} | {'贡献得分'}")
     print("-"*45)
     for i, idx in enumerate(save_indices):
@@ -146,7 +146,8 @@ def diagnose_from_csv(config):
         f"- 稀疏度控制 (sparsity_k): {model.sparsity_k}",
         f"- 高斯核带宽 (sigma): {model.sigma}",
         f"- 显著性水平 (alpha): {model.alpha}",
-        f"- 滑动窗口启用 (use_window): {model.use_window}"
+        f"- 滑动窗口启用 (use_window): {model.use_window}",
+        f"- 贡献度模式 (contrib_mode): {contrib_mode}",
     ]
     if model.use_window:
         log_lines.append(f"- 滑动窗口大小 (window_size): {model.window_size}")
@@ -173,16 +174,13 @@ def diagnose_from_csv(config):
     # 绘图
     plot_results(dcc_scores, save_indices, feature_names, output_img_path, top_k)
 
-# // ...existing code...
 
 def plot_global_anomaly(stat_scores, threshold, output_img):
     fig, ax = plt.subplots(figsize=(14, 5))
     time_axis = np.arange(len(stat_scores))
     
-    # 判断正常/异常区间
     is_anomaly = stat_scores > threshold
     
-    # 绘制背景色
     i = 0
     while i < len(stat_scores):
         j = i
@@ -192,16 +190,12 @@ def plot_global_anomaly(stat_scores, threshold, output_img):
         ax.axvspan(i, j, alpha=0.5, color=color)
         i = j
     
-    # 绘制曲线和阈值线
     ax.plot(time_axis, stat_scores, color='steelblue', linewidth=1.2, label='系统状态分数')
     ax.axhline(y=threshold, color='red', linestyle='--', linewidth=1.5, 
                label=f'异常阈值（{threshold:.2f}）')
     
-    # 使用对数刻度
-    ax.set_yscale('symlog', linthresh=threshold * 10)
-    
     ax.set_xlabel('时间步', fontsize=12)
-    ax.set_ylabel('异常分数（对数刻度）', fontsize=12)
+    ax.set_ylabel('异常分数 (log)', fontsize=12)
     ax.legend(loc='upper left', fontsize=10)
     ax.tick_params(axis='both', which='both', length=0)
     ax.grid(axis='y', linestyle=':', alpha=0.3)
@@ -211,7 +205,6 @@ def plot_global_anomaly(stat_scores, threshold, output_img):
     plt.close()
     print(f">>> 全局异常趋势图已保存至: {output_img}")
 
-# // ...existing code...
 
 def plot_results(dcc_scores, highlight_indices, feature_names, output_img, top_k):
     n_vars = len(dcc_scores)
@@ -220,17 +213,10 @@ def plot_results(dcc_scores, highlight_indices, feature_names, output_img, top_k
     colors = ['crimson' if i in highlight_indices else 'lightgray' for i in range(n_vars)]
     plt.bar(x_idx, dcc_scores, color=colors, alpha=0.9)
     
-    # 只在异常变量位置显示名称，其余位置留空
     tick_labels = [feature_names[i] if i in highlight_indices else '' for i in range(n_vars)]
     plt.xticks(x_idx, tick_labels, rotation=45, ha='right', fontsize=9)
     
-    # 去掉x轴和y轴的刻度线
     plt.tick_params(axis='both', which='both', length=0)
-    
-    # 在异常变量柱状图顶部显示数值
-    # for i in highlight_indices:
-    #     plt.text(i, dcc_scores[i], f'{dcc_scores[i]:.4f}', 
-    #              ha='center', va='bottom', fontsize=8, fontweight='bold', color='crimson')
 
     plt.ylabel('异常贡献度', fontsize=12)
     plt.grid(axis='y', linestyle=':', alpha=0.3)
