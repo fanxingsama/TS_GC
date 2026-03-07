@@ -104,15 +104,16 @@ def diagnose_from_csv(config):
                     plt.axvspan(start, end, color='lightcoral', alpha=0.2)
                 else:
                     plt.axvspan(start, end, color='lightskyblue', alpha=0.2)
-            
+        
         plt.title(f'{name}')
         plt.xlabel('时间步')
         plt.ylabel('异常分数')
+        plt.tick_params(axis='both', which='both', length=0) # 去掉刻度线
         
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
         plt.legend(by_label.values(), by_label.keys(), loc='upper left')
-        
+
         plt.grid(True, linestyle=':', alpha=0.4)
         plt.tight_layout()
         
@@ -216,7 +217,7 @@ def plot_results(dcc_scores, highlight_indices, feature_names, output_img, top_k
     tick_labels = [feature_names[i] if i in highlight_indices else '' for i in range(n_vars)]
     plt.xticks(x_idx, tick_labels, rotation=45, ha='right', fontsize=9)
     
-    plt.tick_params(axis='both', which='both', length=0)
+    plt.tick_params(axis='both', which='both', length=0) # 去掉刻度线
 
     plt.ylabel('异常贡献度', fontsize=12)
     plt.grid(axis='y', linestyle=':', alpha=0.3)
