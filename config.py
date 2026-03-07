@@ -1,20 +1,19 @@
 # config.py
 import torch
-from util.util import create_data
+from util.util import create_data, get_latest_run_id
 import os
+from pathlib import Path
 
+run_id = get_latest_run_id(base_path_str='Find_root/PCA_saved')
+# model_path = Path('saved') / run_id
+# DATA_PATH = os.path.join('Find_root', 'PCA_saved', run_id, 'potential_var.csv')
+# GC_PATH = None
 
-# DATA_PATH = os.path.join('data', 'virtual','simu_data', 'series_data2.csv')
-# GC_PATH = os.path.join('data', 'virtual', 'simu_data', 'granger_causality2.csv')
+DATA_PATH = os.path.join('data','virtual', 'time_series_linear.csv')
+GC_PATH = os.path.join('data','virtual', 'causal_relations.csv')
 
-# DATA_PATH = os.path.join('data', 'virtual','fMRI', 'timeseries6.csv')
-# GC_PATH = os.path.join('data', 'virtual', 'fMRI', 'sim6_gt_processed.csv')
-
-# DATA_PATH = os.path.join('data','virtual', 'time_series_linear.csv')
-# GC_PATH = os.path.join('data','virtual', 'causal_relations.csv')
-
-DATA_PATH = os.path.join('data','virtual', 'time_series_nonlinear.csv')
-GC_PATH = os.path.join('data','virtual', 'causality_nonlinear.csv')
+# DATA_PATH = os.path.join('data','virtual', 'time_series_nonlinear.csv')
+# GC_PATH = os.path.join('data','virtual', 'causality_nonlinear.csv')
 
 INPUT_WINDOW = 5
 OUTPUT_WINDOW = 1

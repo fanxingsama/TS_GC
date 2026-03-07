@@ -28,8 +28,8 @@ def create_data(data_path, input_window, output_window):
     
     return X_data, Y_data, num_series, series_names
 
-def get_latest_run_id():
-    base_path = Path('saved')
+def get_latest_run_id(base_path_str='saved'):
+    base_path = Path(base_path_str)
     if not base_path.exists():
         return None
     

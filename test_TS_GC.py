@@ -104,6 +104,8 @@ def prediction_compare(model, X_data, Y_data, series_names, save_path=None, poin
     return mae, mse
 
 # 绘制三个格兰杰因果图的对比：真实、预测、约束后
+
+
 def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, save_path, true_csv_path=None, show_weights=True):
     """
     基于 test_test.py 的绘图逻辑修改，增加了对序列名称的支持。
@@ -117,13 +119,10 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     """
     series_num = len(series_names)
     
-    # 建立 名称 -> 索引 的映射字典 (用于解析CSV中的名称)
-    # 使用 normalize_name 确保匹配准确，假设 normalize_name 已定义在 util 中
     name_to_idx = {normalize_name(name): idx for idx, name in enumerate(series_names)}
     
     def load_gc_matrix(csv_path, series_num, has_weights=True):
         """加载GC矩阵，支持名称解析"""
-        # 强制读取前两列为字符串，防止数字名称被当做数字处理
         try:
             df = pd.read_csv(csv_path, header=None, dtype={0: str, 1: str})
         except pd.errors.EmptyDataError:
@@ -138,11 +137,9 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
             effect_str = normalize_name(str(row.iloc[1]))
             
             try:
-                # 1. 尝试通过名称查找索引
                 if cause_str in name_to_idx:
                     cause = name_to_idx[cause_str]
                 else:
-                    # 2. 如果名称匹配失败，尝试直接作为索引数字解析 (兼容旧版CSV)
                     cause = int(float(cause_str))
                 
                 if effect_str in name_to_idx:
@@ -150,10 +147,8 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
                 else:
                     effect = int(float(effect_str))
             except (ValueError, KeyError):
-                # 如果既不是已知名称也不是数字，跳过
                 continue
 
-            # 填充矩阵 (行=Effect, 列=Cause)
             if 0 <= cause < series_num and 0 <= effect < series_num:
                 binary_matrix[effect, cause] = 1
                 if has_weights and row.shape[0] >= 3:
@@ -180,32 +175,27 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     # --- 1. 绘制真实格兰杰因果矩阵（如果提供）---
     if has_ground_truth:
         axarr[plot_idx].imshow(GC_true, cmap='Blues', aspect='auto')
-        axarr[plot_idx].set_title('真实格兰杰因果矩阵\n(GC Ground Truth)', fontsize=12)
-        axarr[plot_idx].set_ylabel('受影响的序列 (Effect series)')
-        axarr[plot_idx].set_xlabel('原因序列 (Causal series)')
+        axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
+        axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
         axarr[plot_idx].set_xticks(np.arange(series_num))
         axarr[plot_idx].set_yticks(np.arange(series_num))
-        # 使用名称作为标签
         axarr[plot_idx].set_xticklabels(series_names, rotation=45, ha='right')
         axarr[plot_idx].set_yticklabels(series_names)
+        axarr[plot_idx].tick_params(axis='both', which='both', length=0)
         plot_idx += 1
     
     # --- 2. 绘制原始预测的格兰杰因果矩阵 ---
     if show_weights and np.any(GC_pred_weights > 0):
-        # 使用 extent 确保坐标对齐
-        img_pred = axarr[plot_idx].imshow(GC_pred_weights, cmap='Blues', aspect='auto',
-                                          extent=(-0.5, series_num-0.5, series_num-0.5, -0.5))
-        axarr[plot_idx].set_title('模型预测的GC矩阵\n(Model Prediction)', fontsize=12)
-        fig.colorbar(img_pred, ax=axarr[plot_idx], orientation='vertical', fraction=0.046, pad=0.04)
+        axarr[plot_idx].imshow(GC_pred_weights, cmap='Blues', aspect='auto',
+                               extent=(-0.5, series_num-0.5, series_num-0.5, -0.5))
     else:
         axarr[plot_idx].imshow(GC_pred_binary, cmap='Blues', aspect='auto')
-        axarr[plot_idx].set_title('模型预测的GC矩阵\n(Model Prediction)', fontsize=12)
     
-    axarr[plot_idx].set_ylabel('受影响的序列 (Effect series)')
-    axarr[plot_idx].set_xlabel('原因序列 (Causal series)')
+    axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
+    axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
     axarr[plot_idx].set_xticks(np.arange(series_num))
     axarr[plot_idx].set_yticks(np.arange(series_num))
-    # 使用名称作为标签
+    axarr[plot_idx].tick_params(axis='both', which='both', length=0)
     axarr[plot_idx].set_xticklabels(series_names, rotation=45, ha='right')
     axarr[plot_idx].set_yticklabels(series_names)
     pred_plot_idx = plot_idx
@@ -213,21 +203,18 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     
     # --- 3. 绘制约束后的格兰杰因果矩阵 ---
     if show_weights and np.any(GC_constrained_weights > 0):
-        img_constrained = axarr[plot_idx].imshow(GC_constrained_weights, cmap='Blues', aspect='auto',
-                                                 extent=(-0.5, series_num-0.5, series_num-0.5, -0.5))
-        axarr[plot_idx].set_title('MAD约束后的GC矩阵\n(MAD Constrained)', fontsize=12)
-        fig.colorbar(img_constrained, ax=axarr[plot_idx], orientation='vertical', fraction=0.046, pad=0.04)
+        axarr[plot_idx].imshow(GC_constrained_weights, cmap='Blues', aspect='auto',
+                               extent=(-0.5, series_num-0.5, series_num-0.5, -0.5))
     else:
         axarr[plot_idx].imshow(GC_constrained_binary, cmap='Blues', aspect='auto')
-        axarr[plot_idx].set_title('MAD约束后的GC矩阵\n(MAD Constrained)', fontsize=12)
     
-    axarr[plot_idx].set_ylabel('受影响的序列 (Effect series)')
-    axarr[plot_idx].set_xlabel('原因序列 (Causal series)')
+    axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
+    axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
     axarr[plot_idx].set_xticks(np.arange(series_num))
     axarr[plot_idx].set_yticks(np.arange(series_num))
-    # 使用名称作为标签
     axarr[plot_idx].set_xticklabels(series_names, rotation=45, ha='right')
     axarr[plot_idx].set_yticklabels(series_names)
+    axarr[plot_idx].tick_params(axis='both', which='both', length=0)
     constrained_plot_idx = plot_idx
     
     # --- 在预测矩阵上添加权重文本和错误标记 ---
@@ -237,56 +224,23 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     for binary_mat, weight_mat, ax_idx in matrix_configs:
         ax = axarr[ax_idx]
         
-        for i in range(series_num): # Row (Effect)
-            for j in range(series_num): # Col (Cause)
-                # 显示权重文本
-                # 只有当 binary_mat 为 1 (存在因果) 且 weight > 0 时才显示
+        for i in range(series_num):
+            for j in range(series_num):
                 if show_weights and binary_mat[i, j] == 1 and weight_mat[i, j] > 0:
                     weight_val = weight_mat[i, j]
-                    # 使用与 test_test.py 相同的格式化
                     text = f"{weight_val:.3f}"
                     
-                    # 智能颜色调整：如果背景很深（权重很大），用白色字体
                     max_val = weight_mat.max() if weight_mat.max() > 0 else 1.0
                     text_color = 'white' if weight_val > (max_val * 0.5) else 'black'
                     
                     ax.text(j, i, text, ha="center", va="center",
                            color=text_color, fontsize=8, weight='bold')
                 
-                # 标记与真实值不同的位置（仅在有真实值时）
                 if has_ground_truth and GC_true[i, j] != binary_mat[i, j]:
                     rect = plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor='none',
                                        edgecolor='red', linewidth=2)
                     ax.add_patch(rect)
     
-    # --- 计算并显示评估指标 ---
-    if has_ground_truth:
-        def calculate_metrics(true_mat, pred_mat):
-            TP = np.sum((true_mat == 1) & (pred_mat == 1))
-            TN = np.sum((true_mat == 0) & (pred_mat == 0))
-            FP = np.sum((true_mat == 0) & (pred_mat == 1))
-            FN = np.sum((true_mat == 1) & (pred_mat == 0))
-            
-            accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
-            precision = TP / (TP + FP) if (TP + FP) > 0 else 0
-            recall = TP / (TP + FN) if (TP + FN) > 0 else 0
-            f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-            
-            return accuracy, precision, recall, f1_score
-        
-        acc_pred, prec_pred, rec_pred, f1_pred = calculate_metrics(GC_true, GC_pred_binary)
-        acc_const, prec_const, rec_const, f1_const = calculate_metrics(GC_true, GC_constrained_binary)
-        
-        metrics_text_pred = f'Acc: {acc_pred:.3f}, Prec: {prec_pred:.3f}\nRec: {rec_pred:.3f}, F1: {f1_pred:.3f}'
-        metrics_text_const = f'Acc: {acc_const:.3f}, Prec: {prec_const:.3f}\nRec: {rec_const:.3f}, F1: {f1_const:.3f}'
-        
-        axarr[pred_plot_idx].text(0.02, 0.98, metrics_text_pred, transform=axarr[pred_plot_idx].transAxes,
-                                  verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-                                  fontsize=9)
-        axarr[constrained_plot_idx].text(0.02, 0.98, metrics_text_const, transform=axarr[constrained_plot_idx].transAxes,
-                                         verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8),
-                                         fontsize=9)
-
     fig.tight_layout(pad=3.0)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()

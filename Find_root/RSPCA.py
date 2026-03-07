@@ -1,13 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
-import matplotlib.pyplot as plt
 import pywt
-from scipy import stats
-
-# ==========================================
-# 第一部分：独立预处理器 (保持不变)
-# ==========================================
 
 class WaveletDenoiser:
     def __init__(self, wavelet='sym8', level=3, threshold_coeff=2.0):
@@ -30,7 +24,6 @@ class WaveletDenoiser:
         return denoised_data
 
 class RobustScaler:
-    """鲁棒标准化器：修复极小方差变量导致的数值爆炸问题"""
     def __init__(self):
         self.median = None                
         self.mad = None                   
@@ -38,40 +31,30 @@ class RobustScaler:
     def fit(self, X):
         self.median = np.median(X, axis=0)
         self.mad = np.median(np.abs(X - self.median), axis=0)
-        
-        # 【关键修改】：如果 MAD 非常小（小于 1e-4），说明该变量几乎恒定。
-        # 我们不要用极小数去除它，而是强制让它除以 1.0 (通过反除 1.4826)，保持原本的微小波动即可。
         self.mad[self.mad < 1e-4] = 1.0 / 1.4826
 
     def transform(self, X):
-        """标准化公式：(X - 中位数) / (1.4826 * MAD)"""
         return (X - self.median) / (1.4826 * self.mad)
 
-# ==========================================
-# 第二部分：核心模型 (已更新)
-# ==========================================
 
 class RNSPCA:
-    """稀疏核主成分分析（RNSPCA）- 支持自定义统计量和滑动窗口"""
+    """稀疏核主成分分析（RNSPCA）- 仅聚焦 SPE 统计量"""
     def __init__(self, n_components=6, sparsity_k=4, sigma=1.0, window_size=3, use_window=True, alpha=0.01):
-        self.n_components = n_components # 主成分数量
-        self.sparsity_k = sparsity_k # 每个主成分保留的非零元素数量
-        self.sigma = sigma * 1.4826 # 核宽度参数
-        self.window_size = window_size # 滑动窗口大小 (默认为3，表示当前时刻和前两个时刻的联合分析)
-        self.use_window = use_window      # 新增：滑动窗口开关 
-        self.alpha = alpha             # 显著性水平 (用于计算全局异常阈值)
+        self.n_components = n_components 
+        self.sparsity_k = sparsity_k 
+        self.sigma = sigma * 1.4826 
+        self.window_size = window_size 
+        self.use_window = use_window      
+        self.alpha = alpha             
         self.V_sparse = None
         self.pseudo_values = None
-        self.normal_baseline_T2 = None
         self.normal_baseline_SPE = None
         self.n_original_vars = None
-        self.S2_threshold = None
-        self.SPE_threshold = None         # 新增：SPE 全局异常阈值
+        self.SPE_threshold = None         
 
-    # 时序嵌入
     def _create_lagged_matrix(self, X):
         if not self.use_window or self.window_size <= 1:
-            return X  # 不使用滑动窗口时直接返回原数据
+            return X  
             
         n_samples, n_features = X.shape 
         if n_samples < self.window_size:
@@ -87,7 +70,6 @@ class RNSPCA:
         X_lagged = np.hstack(new_features)
         return X_lagged
     
-    # HSIC矩阵计算
     def _compute_hsic_matrix(self, X):
         n_samples, n_vars = X.shape
         K_centered_list = []
@@ -100,7 +82,6 @@ class RNSPCA:
             k_mean_col = K.mean(axis=1, keepdims=True)
             k_mean_all = K.mean()
             K_centered = K - k_mean_row - k_mean_col + k_mean_all
-            
             K_centered_list.append(K_centered)
         
         hsic_matrix = np.zeros((n_vars, n_vars))
@@ -117,35 +98,24 @@ class RNSPCA:
         print("\nHSIC 矩阵计算完成。")
         return hsic_matrix
     
-    # 贡献度计算
-    def _calculate_all_contributions(self, X_scaled):
-        lambda_inv = np.diag(1.0 / (self.pseudo_values + 1e-10))
+    def _calculate_spe_contributions(self, X_scaled):
         scores = X_scaled @ self.V_sparse
-        T2_cont_matrix = np.abs(X_scaled * (scores @ lambda_inv @ self.V_sparse.T))
-        
         X_hat = scores @ self.V_sparse.T
         SPE_cont_matrix = (X_scaled - X_hat)**2
         
-        mean_T2_ext = np.mean(T2_cont_matrix, axis=0)
         mean_SPE_ext = np.mean(SPE_cont_matrix, axis=0)
-        
-        final_T2 = np.zeros(self.n_original_vars)
         final_SPE = np.zeros(self.n_original_vars)
         
-        # 兼容无滑动窗口的情况
         if self.use_window and self.window_size > 1:
             for w in range(self.window_size):
                 start_idx = w * self.n_original_vars
                 end_idx = start_idx + self.n_original_vars
-                final_T2 += mean_T2_ext[start_idx:end_idx]
                 final_SPE += mean_SPE_ext[start_idx:end_idx]
         else:
-            final_T2 = mean_T2_ext
             final_SPE = mean_SPE_ext
             
-        return final_T2, final_SPE
+        return final_SPE
 
-    # 离线建模
     def fit_offline(self, X_scaled):
         self.n_original_vars = X_scaled.shape[1]
         
@@ -180,41 +150,43 @@ class RNSPCA:
             sigma_t = I_qq @ sigma_t @ I_qq  
             delta_t = delta_t @ I_qq  
 
-        self.normal_baseline_T2, self.normal_baseline_SPE = self._calculate_all_contributions(X_lagged)
+        self.normal_baseline_SPE = self._calculate_spe_contributions(X_lagged)
         
-        # 1. 计算 T2 (S^2) 阈值 (F分布)
-        n = X_lagged.shape[0]
-        K = self.n_components
-        F_val = stats.f.ppf(1 - self.alpha, K, n - K)
-        self.S2_threshold = (K * (n**2 - 1)) / (n * (n - K)) * F_val
+        # ============== 新增: 计算并保存每个变量专属的 SPE 阈值 ==============
+        scores_normal = X_lagged @ self.V_sparse
+        X_hat_normal = scores_normal @ self.V_sparse.T
+        SPE_cont_matrix_normal = (X_lagged - X_hat_normal)**2
         
-        # 2. 计算 SPE 阈值 (基于正常样本的经验百分位)
+        var_SPE_series_normal = np.zeros((SPE_cont_matrix_normal.shape[0], self.n_original_vars))
+        if self.use_window and self.window_size > 1:
+            for w in range(self.window_size):
+                start_idx = w * self.n_original_vars
+                end_idx = start_idx + self.n_original_vars
+                var_SPE_series_normal += SPE_cont_matrix_normal[:, start_idx:end_idx]
+        else:
+            var_SPE_series_normal = SPE_cont_matrix_normal
+            
+        # 计算每个变量的阈值 (按设定的显著性水平 alpha，如 99% 或 99.9% 分位数)
+        self.var_SPE_thresholds = np.percentile(var_SPE_series_normal, (1 - self.alpha) * 100, axis=0)
+        # =====================================================================
+        
+        # 计算 SPE 阈值
         scores_normal = X_lagged @ self.V_sparse
         X_hat_normal = scores_normal @ self.V_sparse.T
         SPE_scores_normal = np.sum((X_lagged - X_hat_normal)**2, axis=1)
         self.SPE_threshold = np.percentile(SPE_scores_normal, (1 - self.alpha) * 100)
         
-        print(f"离线建模完成。已建立双指标基准。")
-        print(f"系统全局异常阈值设为 -> T2(S^2): {self.S2_threshold:.4f} | SPE: {self.SPE_threshold:.4f}")
+        print(f"离线建模完成。全局异常阈值设为 -> SPE: {self.SPE_threshold:.4f}")
 
-    # 系统全局异常监测计算
-    def predict_global_anomaly(self, X_scaled_fault, stat_type='T2'):
-        """计算系统随时间变化的全局异常监测统计量 S^2 或 SPE"""
+    def predict_global_anomaly(self, X_scaled_fault):
+        """仅返回 SPE 统计量"""
         X_fault_lagged = self._create_lagged_matrix(X_scaled_fault)
         scores = X_fault_lagged @ self.V_sparse
         
-        if stat_type == 'T2':
-            lambda_inv = np.diag(1.0 / (self.pseudo_values + 1e-10))
-            stat_scores = np.sum((scores @ lambda_inv) * scores, axis=1)
-            threshold = self.S2_threshold
-        elif stat_type == 'SPE':
-            X_hat = scores @ self.V_sparse.T
-            stat_scores = np.sum((X_fault_lagged - X_hat)**2, axis=1)
-            threshold = self.SPE_threshold
-        else:
-            raise ValueError("stat_type 参数必须是 'T2' 或 'SPE'")
+        X_hat = scores @ self.V_sparse.T
+        stat_scores = np.sum((X_fault_lagged - X_hat)**2, axis=1)
+        threshold = self.SPE_threshold
         
-        # 处理滑动窗口导致的时间轴对齐问题
         if self.use_window and self.window_size > 1:
             pad_length = self.window_size - 1
             padded_stat = np.pad(stat_scores, (pad_length, 0), constant_values=np.nan)
@@ -223,24 +195,40 @@ class RNSPCA:
             
         return padded_stat, threshold
 
-    # 故障诊断 (针对根因变量提取)
-    def trigger_diagnose(self, X_scaled_fault, stat_type='T2'):
+    def trigger_diagnose(self, X_scaled_fault):
         X_fault_lagged = self._create_lagged_matrix(X_scaled_fault)
-        fault_cont_T2, fault_cont_SPE = self._calculate_all_contributions(X_fault_lagged)
+        fault_cont_SPE = self._calculate_spe_contributions(X_fault_lagged)
         
-        if stat_type == 'T2':
-            DCC = np.abs(fault_cont_T2 - self.normal_baseline_T2)
-        elif stat_type == 'SPE':
-            DCC = np.abs(fault_cont_SPE - self.normal_baseline_SPE)
-        else:
-            raise ValueError("stat_type 参数必须是 'T2' 或 'SPE'")
-            
+        DCC = np.abs(fault_cont_SPE - self.normal_baseline_SPE)
         DCC_norm = DCC / (np.sum(DCC) + 1e-10)
         
         return {
-            'before_T2': self.normal_baseline_T2,
-            'after_T2': fault_cont_T2,
             'before_SPE': self.normal_baseline_SPE,
             'after_SPE': fault_cont_SPE,
             'dcc_norm': DCC_norm,
         }
+        
+    def get_variable_spe_series(self, X_scaled_fault):
+        """获取每个变量随时间变化的 SPE 异常分数序列"""
+        X_fault_lagged = self._create_lagged_matrix(X_scaled_fault)
+        scores = X_fault_lagged @ self.V_sparse
+        X_hat = scores @ self.V_sparse.T
+        SPE_cont_matrix = (X_fault_lagged - X_hat)**2
+        
+        # 将滑动窗口中的多列对应回原始变量并求和
+        var_SPE_series = np.zeros((SPE_cont_matrix.shape[0], self.n_original_vars))
+        if self.use_window and self.window_size > 1:
+            for w in range(self.window_size):
+                start_idx = w * self.n_original_vars
+                end_idx = start_idx + self.n_original_vars
+                var_SPE_series += SPE_cont_matrix[:, start_idx:end_idx]
+        else:
+            var_SPE_series = SPE_cont_matrix
+            
+        # 填充由于滑动窗口导致的前几个缺失时间点 (保证时间长度与原始测试集一致)
+        if self.use_window and self.window_size > 1:
+            pad_length = self.window_size - 1
+            padded_series = np.pad(var_SPE_series, ((pad_length, 0), (0, 0)), constant_values=np.nan)
+            return padded_series
+            
+        return var_SPE_series

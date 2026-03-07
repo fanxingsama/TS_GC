@@ -147,8 +147,8 @@ def analyze_root_cause_and_save(model_folder_path):
 def main():
     # 1. 获取 ID (逻辑同 test_TS_GC.py)
     # 你可以手动指定，也可以自动获取最新
-    run_id = 'T2_high' 
-    # run_id = get_latest_run_id()
+    # run_id = 'T2_high' 
+    run_id = get_latest_run_id()
     
     if not run_id:
         print("错误: 无法获取 run_id")
@@ -157,9 +157,6 @@ def main():
     # 2. 构建基础路径
     base_path = Path('saved') / run_id
     
-    if not base_path.exists():
-        print(f"错误: 文件夹不存在 {base_path}")
-        return
 
     # 3. 执行分析
     analyze_root_cause_and_save(base_path)
