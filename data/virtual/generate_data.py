@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import os
 
 def make_var_stationary(beta, radius=0.97):
     p = beta.shape[0]
@@ -16,19 +17,26 @@ def make_var_stationary(beta, radius=0.97):
 def generate_merged_equations_data(p=8, T=1000, lag=3, sd=0.1, seed=0):
     np.random.seed(seed)
     
-    # 1. 基础权重生成
-    beta_base = np.zeros((p, p))
-    for i in range(p):
-        beta_base[i, i] = np.random.uniform(0.3, 0.5) # 自回归
+    # 1. 构建包含所有滞后信息的完整权重矩阵 (p 行, p * lag 列)
+    beta_stacked = np.zeros((p, p * lag))
     
+    # 自回归：序列自身的平稳连贯性，设定在 t-1 (即滞后1步)
     for i in range(p):
-        num_others = np.random.randint(1, 4) # 每个序列受 1-3 个其他序列影响
+        beta_stacked[i, i] = np.random.uniform(0.3, 0.5) 
+    
+    # 交叉因果关系：为每一对关系随机指定一个特定的滞后步数
+    for i in range(p):
+        num_others = np.random.randint(1, 4) 
         others = np.random.choice([j for j in range(p) if j != i], size=num_others, replace=False)
         for other in others:
-            beta_base[i, other] = np.random.uniform(0.2, 0.7)
+            chosen_lag = np.random.randint(1, lag + 1)
+            sign = np.random.choice([1, -1]) 
+            weight = np.random.uniform(0.2, 0.7) * sign
             
-    # 2. 构造平稳系统（3阶滞后权重相同）
-    beta_stacked = np.hstack([beta_base for _ in range(lag)])
+            col_index = (chosen_lag - 1) * p + other
+            beta_stacked[i, col_index] = weight
+            
+    # 2. 构造平稳系统
     beta_stationary = make_var_stationary(beta_stacked)
     
     # 3. 生成数据并保存
@@ -43,53 +51,48 @@ def generate_merged_equations_data(p=8, T=1000, lag=3, sd=0.1, seed=0):
     x_final = x.T[burn_in:]
     pd.DataFrame(np.round(x_final, 3), columns=[f'x{i}' for i in range(p)]).to_csv('time_series_linear.csv', index=False)
     
-    # 4. 【核心修改】合并系数并打印公式
-    print("\n" + "="*80)
-    print(f"生成的 8 维系统合并数学公式:")
-    print("="*80)
+    # 4. 提取信息、生成公式并保存到日志和 CSV
+    causal_links = []
+    log_lines = []
     
-    for i in range(p):
-        # 统计每个变量 j 在所有滞后阶数上的系数总和
-        total_weights = np.zeros(p)
-        for l in range(lag):
-            # 提取对应滞后的系数块
-            start_col = l * p
-            total_weights += beta_stationary[i, start_col : start_col + p]
-            
-        # 拼接合并后的公式
+    log_lines.append("=" * 80)
+    log_lines.append(f"生成的 {p} 维系统数学公式 (保留单一显著滞后信息):")
+    log_lines.append("=" * 80)
+    
+    for i in range(p): # 果 (Target)
         formula_parts = []
-        for j in range(p):
-            val = total_weights[j]
-            if abs(val) > 1e-4:
-                # 确定正负号
-                sign = " + " if (len(formula_parts) > 0 and val > 0) else (" - " if val < 0 else "")
-                if len(formula_parts) == 0 and val < 0: sign = "-"
-                # 不再显示 [t-1] 等滞后符号，直接显示变量名
-                formula_parts.append(f"{sign}{abs(val):.3f}*x{j}")
+        for j in range(p): # 因 (Source)
+            has_causal = False
+            for l in range(lag):
+                val = beta_stationary[i, l * p + j]
+                if abs(val) > 1e-4:
+                    has_causal = True
+                    sign_str = " + " if (len(formula_parts) > 0 and val > 0) else (" - " if val < 0 else "")
+                    if len(formula_parts) == 0 and val < 0: sign_str = "-"
+                    formula_parts.append(f"{sign_str}{abs(val):.3f}*x{j}[t-{l+1}]")
+            
+            # 只要在任何一个 lag 上有影响，就在 CSV 中记录这条因果边 (权重统一设为 1)
+            if has_causal:
+                causal_links.append([f"x{j}", f"x{i}", 1])
         
         full_formula = f"x{i}[t] =" + "".join(formula_parts) + f" + ε_{i}[t]"
-        print(full_formula)
-        print("-" * 40)
+        log_lines.append(full_formula)
+        log_lines.append("-" * 40)
         
-    # 5. 提取并保存因果关系（新增部分）
-    causal_links = []
-    for i in range(p): # 果 (Target)
-        # 统计每个变量 j 在所有滞后阶数上的系数
-        for j in range(p): # 因 (Source)
-            # 检查该变量在所有 lag 中是否有非零系数
-            is_causal = False
-            for l in range(lag):
-                if abs(beta_stationary[i, l * p + j]) > 1e-4:
-                    is_causal = True
-                    break
-            
-            if is_causal:
-                # 第一列是因(xj)，第二列是果(xi)
-                causal_links.append([f"x{j}", f"x{i}", 1])
-    
-    # 转换为 DataFrame 并导出，不包含表头和索引
+    # 打印日志到控制台
+    for line in log_lines:
+        print(line)
+        
+    # 将日志写入 txt 文件
+    with open('data_generation_linear_log.txt', 'w', encoding='utf-8') as f:
+        f.write("\n".join(log_lines))
+        
+    # 5. 保存纯净版的三列 CSV (无表头)
     pd.DataFrame(causal_links).to_csv('causal_relations.csv', index=False, header=False)
-    print(f"\n因果关系已保存至: causal_relations.csv (共 {len(causal_links)} 条边)")
+    
+    print(f"\n✅ 数据已生成: time_series_linear.csv")
+    print(f"✅ 因果边(3列无表头)已保存至: causal_relations.csv (共 {len(causal_links)} 条边)")
+    print(f"✅ 滞后详情日志已保存至: data_generation_linear_log.txt")
 
 # 执行
 generate_merged_equations_data()

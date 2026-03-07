@@ -352,6 +352,73 @@ def constrain_with_hard_threshold(gc_csv_path, output_csv_path, series_names, th
     else:
         print(f"无满足条件(>={threshold})的因果关系")
 
+# ================= 新增：提取并绘制滞后性分析图表 =================
+def analyze_and_plot_lags(model, constrained_csv_path, series_names, save_path):
+    """
+    基于模型一维卷积层的权重，分析并可视化被保留下来的因果关系边的具体滞后步权重分布。
+    """
+    lag_dir = save_path / "lag_analysis"
+    os.makedirs(lag_dir, exist_ok=True)
+
+    # 1. 开启 ignore_kernel=False 从而在最后一维保留 kernel_size 维度的信息
+    # 得到的形状为: [目标序列数(Target), 源序列数(Source), 滞后步数(Kernel_size)]
+    GC_lag_tensor = model.GC(threshold=False, ignore_kernel=False).detach().cpu().numpy()
+    kernel_size = GC_lag_tensor.shape[2]
+    
+    # 2. 读取经过阈值约束后的有效因果关系（我们只关心这些具备显著关系的序列对）
+    try:
+        df = pd.read_csv(constrained_csv_path, header=None, dtype={0: str, 1: str})
+    except pd.errors.EmptyDataError:
+        print("约束后的因果关系文件为空，跳过滞后性分析。")
+        return
+
+    name_to_idx = {normalize_name(name): idx for idx, name in enumerate(series_names)}
+    
+    # 假设卷积核的时间步从 1 到 kernel_size，代表 t-1, t-2 ... 的滞后性
+    lags = np.arange(1, kernel_size + 1)
+    plot_count = 0
+    
+    # 3. 针对每一个保留下来的因果关联对生成分布图
+    for _, row in df.iterrows():
+        source_name = normalize_name(str(row.iloc[0]))
+        target_name = normalize_name(str(row.iloc[1]))
+        
+        if source_name in name_to_idx and target_name in name_to_idx:
+            s_idx = name_to_idx[source_name]
+            t_idx = name_to_idx[target_name]
+            
+            # 提取具体的滞后分布数组
+            lag_weights = GC_lag_tensor[t_idx, s_idx, :]
+            
+            # 创建图表
+            fig, ax = plt.subplots(figsize=(8, 5))
+            bars = ax.bar(lags, lag_weights, color='#4C72B0', edgecolor='black', alpha=0.85)
+            
+            ax.set_title(f'序列因果滞后性: {series_names[s_idx]} -> {series_names[t_idx]}', fontsize=15, pad=15)
+            ax.set_xlabel('过去的时间步数 (Lag Steps)', fontsize=12)
+            ax.set_ylabel('影响强度 (L1 Norm Weight)', fontsize=12)
+            ax.set_xticks(lags)
+            ax.grid(axis='y', linestyle='--', alpha=0.6)
+            
+            # 在每个柱子上方添加具体的数值标签
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0.0001:  # 只标注非零的显著值
+                    ax.text(bar.get_x() + bar.get_width() / 2.0, height,
+                            f'{height:.4f}', ha='center', va='bottom', fontsize=10)
+            
+            # 保存图表，处理文件名中的特殊字符
+            safe_s_name = "".join([c for c in series_names[s_idx] if c.isalnum() or c in (' ', '_', '-')]).strip()
+            safe_t_name = "".join([c for c in series_names[t_idx] if c.isalnum() or c in (' ', '_', '-')]).strip()
+            filename = f"Lag_{safe_s_name}_to_{safe_t_name}.png"
+            
+            plt.savefig(lag_dir / filename, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            plot_count += 1
+            
+    print(f"滞后性分析已完成，共生成 {plot_count} 张图表，已保存至文件夹: {lag_dir}")
+# =====================================================================
+
 def main(model_path):
     # 检查 SERIES_NAME 是否存在
     if 'SERIES_NAME' not in globals() or not SERIES_NAME:
@@ -370,6 +437,8 @@ def main(model_path):
         plot_gc_triple_compare(gc_predict_path, gc_constrain_path, SERIES_NAME, GC_predict_img_path, true_csv_path=GC_PATH, show_weights=True)
         prediction_compare(model, X_DATA, Y_DATA, SERIES_NAME, save_path=model_path)
         save_causal_links(csv_path=gc_constrain_path, img_save_path=causal_links_path, series_names=SERIES_NAME)
+        # 调用滞后性分析绘图
+        analyze_and_plot_lags(model, gc_constrain_path, SERIES_NAME, save_path=model_path)
         
 if __name__ == "__main__":
     run_id = get_latest_run_id()
