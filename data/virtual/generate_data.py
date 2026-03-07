@@ -34,6 +34,7 @@ def generate_merged_equations_data(p=8, T=1000, lag=3, sd=0.1, seed=0):
             weight = np.random.uniform(0.2, 0.7) * sign
             
             col_index = (chosen_lag - 1) * p + other
+            # col_index = (lag - chosen_lag) * p + other
             beta_stacked[i, col_index] = weight
             
     # 2. 构造平稳系统

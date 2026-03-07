@@ -15,19 +15,19 @@ class Config:
     # 2. 数据预处理参数 (Preprocessing Parameters)
     # ==========================================
     USE_WAVELET_DENOISING = True  
-    WAVELET_TYPE = 'db3' 
+    WAVELET_TYPE = 'db3'  # 'db3' 或 'sym4'
     WAVELET_LEVEL = 3 
     WAVELET_THRESHOLD_COEFF = 2.0
 
     # ==========================================
     # 3. RNSPCA 模型超参数 (Model Parameters)
     # ==========================================
-    N_COMPONENTS = 8       
-    SPARSITY_K = 4         
-    SIGMA = 1.0            
-    USE_WINDOW = True      
-    WINDOW_SIZE = 5        
-    ALPHA = 0.001           
+    N_COMPONENTS = 8   # PCA 主成分数量
+    SPARSITY_K = 4    # 每个主成分保留的非零特征数量
+    SIGMA = 1.0       # 稀疏化的软阈值参数     
+    USE_WINDOW = True    # 是否使用滑动窗口进行训练和诊断  
+    WINDOW_SIZE = 5        # 滑动窗口大小
+    ALPHA = 0.001         # 异常显著性水平
 
     # ==========================================
     # 4. 故障诊断与可视化参数 (Diagnosis Parameters)

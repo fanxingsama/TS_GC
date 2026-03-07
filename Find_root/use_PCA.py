@@ -6,6 +6,11 @@ import os
 from datetime import datetime
 from RSPCA import RobustScaler, RNSPCA
 from pca_config import Config
+from matplotlib import rcParams
+
+rcParams['font.family'] = 'SimHei'
+rcParams['axes.unicode_minus'] = False
+
 
 def diagnose_from_csv(config):
     file_path = config.TEST_DATA_PATH
@@ -168,38 +173,45 @@ def diagnose_from_csv(config):
     # 绘图
     plot_results(dcc_scores, save_indices, feature_names, output_img_path, top_k)
 
+# // ...existing code...
+
 def plot_global_anomaly(stat_scores, threshold, output_img):
-    plt.figure(figsize=(12, 6))
-    time_steps = np.arange(len(stat_scores))
-    plt.plot(time_steps, stat_scores, color='#1f77b4', linewidth=1.5, label='Global Anomaly Score', zorder=4)
-    plt.axhline(y=threshold, color='crimson', linestyle='--', linewidth=2, label=f'Control Limit ({threshold:.2f})', zorder=5)
+    fig, ax = plt.subplots(figsize=(14, 5))
+    time_axis = np.arange(len(stat_scores))
     
-    is_anomaly = np.nan_to_num(stat_scores) > threshold
-    diff = np.diff(is_anomaly.astype(int))
-    change_points = np.where(diff != 0)[0] + 1
-    split_indices = [0] + list(change_points) + [len(stat_scores) - 1]
+    # 判断正常/异常区间
+    is_anomaly = stat_scores > threshold
     
-    for i in range(len(split_indices) - 1):
-        start = split_indices[i]
-        end = split_indices[i+1]
-        if is_anomaly[start]:
-            plt.axvspan(start, end, color='lightcoral', alpha=0.2, label='Anomaly Zone' if i < 2 else "")
-        else:
-            plt.axvspan(start, end, color='lightskyblue', alpha=0.2, label='Normal Zone' if i < 2 else "")
-            
-    plt.title('System Global Anomaly Monitoring with Background Zoning', fontsize=14)
-    plt.xlabel('Time Step', fontsize=12)
-    plt.ylabel('Anomaly Score', fontsize=12)
+    # 绘制背景色
+    i = 0
+    while i < len(stat_scores):
+        j = i
+        while j < len(stat_scores) and is_anomaly[j] == is_anomaly[i]:
+            j += 1
+        color = '#FDDEDE' if is_anomaly[i] else '#DDEEFF'
+        ax.axvspan(i, j, alpha=0.5, color=color)
+        i = j
     
-    handles, labels = plt.gca().get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    plt.legend(by_label.values(), by_label.keys(), loc='upper left')
-    plt.tick_params(axis='both', direction='in', which='both', top=False, right=False)
-    plt.grid(True, linestyle=':', alpha=0.4)
+    # 绘制曲线和阈值线
+    ax.plot(time_axis, stat_scores, color='steelblue', linewidth=1.2, label='系统状态分数')
+    ax.axhline(y=threshold, color='red', linestyle='--', linewidth=1.5, 
+               label=f'异常阈值（{threshold:.2f}）')
+    
+    # 使用对数刻度
+    ax.set_yscale('symlog', linthresh=threshold * 10)
+    
+    ax.set_xlabel('时间步', fontsize=12)
+    ax.set_ylabel('异常分数（对数刻度）', fontsize=12)
+    ax.legend(loc='upper left', fontsize=10)
+    ax.tick_params(axis='both', which='both', length=0)
+    ax.grid(axis='y', linestyle=':', alpha=0.3)
+    
     plt.tight_layout()
-    plt.savefig(output_img, dpi=300)
-    print(f">>> 全局异常趋势背景分区图已保存至: {output_img}")
+    plt.savefig(output_img, dpi=300, bbox_inches='tight')
     plt.close()
+    print(f">>> 全局异常趋势图已保存至: {output_img}")
+
+# // ...existing code...
 
 def plot_results(dcc_scores, highlight_indices, feature_names, output_img, top_k):
     n_vars = len(dcc_scores)
@@ -207,11 +219,20 @@ def plot_results(dcc_scores, highlight_indices, feature_names, output_img, top_k
     x_idx = np.arange(n_vars)
     colors = ['crimson' if i in highlight_indices else 'lightgray' for i in range(n_vars)]
     plt.bar(x_idx, dcc_scores, color=colors, alpha=0.9)
-    if n_vars <= 30:
-        plt.xticks(x_idx, feature_names, rotation=45, ha='right', fontsize=9)
-    plt.title(f'Root Cause Diagnosis  - Top {top_k} Variables Highlighted', fontsize=14)
-    plt.xlabel('Sensors / Features', fontsize=12)
-    plt.ylabel('Normalized Contribution Score', fontsize=12)
+    
+    # 只在异常变量位置显示名称，其余位置留空
+    tick_labels = [feature_names[i] if i in highlight_indices else '' for i in range(n_vars)]
+    plt.xticks(x_idx, tick_labels, rotation=45, ha='right', fontsize=9)
+    
+    # 去掉x轴和y轴的刻度线
+    plt.tick_params(axis='both', which='both', length=0)
+    
+    # 在异常变量柱状图顶部显示数值
+    # for i in highlight_indices:
+    #     plt.text(i, dcc_scores[i], f'{dcc_scores[i]:.4f}', 
+    #              ha='center', va='bottom', fontsize=8, fontweight='bold', color='crimson')
+
+    plt.ylabel('异常贡献度', fontsize=12)
     plt.grid(axis='y', linestyle=':', alpha=0.3)
     plt.tight_layout()
     plt.savefig(output_img, dpi=300)

@@ -11,6 +11,7 @@ from model.TS_GC import TS_GC
 import os
 from util.plot_causal_link import save_causal_links
 from util.util import get_latest_run_id, normalize_name
+from sklearn.metrics import f1_score, roc_auc_score
 
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
@@ -107,8 +108,6 @@ def prediction_compare(model, X_data, Y_data, series_names, save_path=None, poin
     return mae, mse
 
 # 绘制三个格兰杰因果图的对比：真实、预测、约束后
-
-
 def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, save_path, true_csv_path=None, show_weights=True):
     """
     基于 test_test.py 的绘图逻辑修改，增加了对序列名称的支持。
@@ -355,6 +354,58 @@ def constrain_with_hard_threshold(gc_csv_path, output_csv_path, series_names, th
     else:
         print(f"无满足条件(>={threshold})的因果关系")
 
+# ================= 新增：计算 F1 和 AUROC 指标 =================
+def evaluate_gc_metrics(true_csv_path, pred_csv_path, constrained_csv_path, series_names):
+    if not true_csv_path or not os.path.exists(true_csv_path):
+        print("未提供真实因果关系文件或文件不存在，跳过 F1 和 AUROC 计算。")
+        return None, None
+        
+    series_num = len(series_names)
+    name_to_idx = {normalize_name(name): idx for idx, name in enumerate(series_names)}
+    
+    def load_matrix(csv_path, is_true=False):
+        binary_mat = np.zeros((series_num, series_num), dtype=int)
+        weight_mat = np.zeros((series_num, series_num))
+        try:
+            df = pd.read_csv(csv_path, header=None, dtype={0: str, 1: str})
+            for _, row in df.iterrows():
+                try:
+                    c_str, e_str = normalize_name(str(row.iloc[0])), normalize_name(str(row.iloc[1]))
+                    c = name_to_idx.get(c_str, int(float(c_str)) if c_str.replace('.','',1).isdigit() else -1)
+                    e = name_to_idx.get(e_str, int(float(e_str)) if e_str.replace('.','',1).isdigit() else -1)
+                    if 0 <= c < series_num and 0 <= e < series_num:
+                        binary_mat[e, c] = 1
+                        if not is_true and len(row) >= 3:
+                            weight_mat[e, c] = float(row.iloc[2])
+                except: continue
+        except Exception: pass
+        return binary_mat, weight_mat
+
+    # 加载真实矩阵、预测连续权重、约束后二值矩阵
+    true_bin, _ = load_matrix(true_csv_path, is_true=True)
+    _, pred_weights = load_matrix(pred_csv_path, is_true=False)
+    constrained_bin, _ = load_matrix(constrained_csv_path, is_true=False)
+    
+    true_labels, pred_probs, pred_labels = [], [], []
+    
+    # 展平矩阵，并剔除对角线（自回归因果）
+    for i in range(series_num):
+        for j in range(series_num):
+            if i != j:
+                true_labels.append(true_bin[i, j])
+                pred_probs.append(pred_weights[i, j])
+                pred_labels.append(constrained_bin[i, j])
+                
+    try:
+        f1 = f1_score(true_labels, pred_labels)
+        # 只有当真实标签既包含0又包含1时，才能计算AUROC
+        auroc = roc_auc_score(true_labels, pred_probs) if len(set(true_labels)) > 1 else float('nan')
+    except Exception as e:
+        print(f"指标计算出错: {e}")
+        f1, auroc = 0.0, 0.0
+        
+    return f1, auroc
+
 # ================= 新增：提取并绘制滞后性分析图表 =================
 def analyze_and_plot_lags(model, constrained_csv_path, series_names, save_path):
     """
@@ -391,7 +442,7 @@ def analyze_and_plot_lags(model, constrained_csv_path, series_names, save_path):
             t_idx = name_to_idx[target_name]
             
             # 提取具体的滞后分布数组
-            lag_weights = GC_lag_tensor[t_idx, s_idx, :]
+            lag_weights = GC_lag_tensor[t_idx, s_idx, :][::-1]
             
             # 创建图表
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -440,9 +491,10 @@ def main(model_path):
         plot_gc_triple_compare(gc_predict_path, gc_constrain_path, SERIES_NAME, GC_predict_img_path, true_csv_path=GC_PATH, show_weights=True)
         prediction_compare(model, X_DATA, Y_DATA, SERIES_NAME, save_path=model_path)
         save_causal_links(csv_path=gc_constrain_path, img_save_path=causal_links_path, series_names=SERIES_NAME)
-        # 调用滞后性分析绘图
         analyze_and_plot_lags(model, gc_constrain_path, SERIES_NAME, save_path=model_path)
-        
+        f1, auroc = evaluate_gc_metrics(GC_PATH, gc_predict_path, gc_constrain_path, SERIES_NAME)
+    
+    return f1, auroc # 确保 main 函数返回这两个指标
 if __name__ == "__main__":
     run_id = get_latest_run_id()
     # run_id = '01-05_11-23-56'

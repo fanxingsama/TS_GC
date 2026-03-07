@@ -341,7 +341,17 @@ def main():
     print("="*50)
     # 导入测试模块
     from test_TS_GC import main as test_main
-    test_main(save_dir)  # 执行测试
+    f1, auroc = test_main(save_dir)  # 执行测试并获取指标
+    
+    # 如果成功计算出指标，则写入 info.log
+    if f1 is not None and auroc is not None:
+        metric_message = (
+            f"\n========== 测试结果 (GC 评估指标) ==========\n"
+            f"  - F1 Score : {f1:.4f}\n"
+            f"  - AUROC    : {auroc:.4f}\n"
+            f"=============================================\n"
+        )
+        train_logger.info(metric_message)
     
     # print("\n" + "="*50)
     # print("测试完成，开始根因分析...")

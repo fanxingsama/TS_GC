@@ -45,7 +45,7 @@ class RNSPCA:
         self.sigma = sigma * 1.4826 
         self.window_size = window_size 
         self.use_window = use_window      
-        self.alpha = alpha             
+        self.alpha = alpha        # 设定显著性水平 (如 0.01 对应 99% 分位数)
         self.V_sparse = None
         self.pseudo_values = None
         self.normal_baseline_SPE = None
