@@ -177,8 +177,8 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     # --- 1. 绘制真实格兰杰因果矩阵（如果提供）---
     if has_ground_truth:
         axarr[plot_idx].imshow(GC_true, cmap='Blues', aspect='auto')
-        axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
-        axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
+        # axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
+        # axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
         axarr[plot_idx].set_xticks(np.arange(series_num))
         axarr[plot_idx].set_yticks(np.arange(series_num))
         axarr[plot_idx].set_xticklabels(series_names, rotation=45, ha='right')
@@ -193,8 +193,8 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     else:
         axarr[plot_idx].imshow(GC_pred_binary, cmap='Blues', aspect='auto')
     
-    axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
-    axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
+    # axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
+    # axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
     axarr[plot_idx].set_xticks(np.arange(series_num))
     axarr[plot_idx].set_yticks(np.arange(series_num))
     axarr[plot_idx].tick_params(axis='both', which='both', length=0)
@@ -210,8 +210,8 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     else:
         axarr[plot_idx].imshow(GC_constrained_binary, cmap='Blues', aspect='auto')
     
-    axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
-    axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
+    # axarr[plot_idx].set_ylabel('受影响的序列', fontsize=18)
+    # axarr[plot_idx].set_xlabel('原因序列', fontsize=18)
     axarr[plot_idx].set_xticks(np.arange(series_num))
     axarr[plot_idx].set_yticks(np.arange(series_num))
     axarr[plot_idx].set_xticklabels(series_names, rotation=45, ha='right')
