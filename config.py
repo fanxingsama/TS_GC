@@ -13,7 +13,7 @@ run_id = get_latest_run_id(base_path_str='Find_root/PCA_saved')
 # GC_PATH = os.path.join('data','virtual', 'causal_relations.csv')
 
 DATA_PATH = os.path.join('data','virtual', 'time_series_nonlinear.csv')
-GC_PATH = os.path.join('data','virtual', 'causality_nonlinear_old.csv')
+GC_PATH = os.path.join('data','virtual', 'causality_nonlinear.csv')
 
 INPUT_WINDOW = 5
 OUTPUT_WINDOW = 1

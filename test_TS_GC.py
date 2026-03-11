@@ -249,7 +249,7 @@ def plot_gc_triple_compare(pred_csv_path, constrained_csv_path, series_names, sa
     print(f"格兰杰因果矩阵对比图已保存至: {save_path}")
 
 # 将模型的格兰杰因果矩阵保存为CSV格式
-def save_gc_matrix_to_csv(model, save_path, series_names, threshold=0.0, ignore_self_causality=True, is_softmax=True):
+def save_gc_matrix_to_csv(model, save_path, series_names, threshold=0.0, ignore_self_causality=False, is_softmax=True):
     # 获取模型估计的GC权重范数矩阵
     GC_est_norms_tensor = model.GC(threshold=False, ignore_kernel=True) 
     GC_est_norms = GC_est_norms_tensor.detach().cpu().numpy()
@@ -267,6 +267,7 @@ def save_gc_matrix_to_csv(model, save_path, series_names, threshold=0.0, ignore_
             GC_est_norms_softmax = softmax(GC_est_norms_masked, axis=1)
             np.fill_diagonal(GC_est_norms_softmax, 0)
         else:
+            # 不忽略自因果：直接对所有元素（包括对角线）做softmax
             GC_est_norms_softmax = softmax(GC_est_norms, axis=1)
         GC_est_norms = GC_est_norms_softmax
     
@@ -280,7 +281,6 @@ def save_gc_matrix_to_csv(model, save_path, series_names, threshold=0.0, ignore_
                 
             weight = round(GC_est_norms[i, j], 3)
             if weight > threshold:
-                # 强制使用名称
                 source_name = series_names[j]
                 target_name = series_names[i]
                 
@@ -291,19 +291,17 @@ def save_gc_matrix_to_csv(model, save_path, series_names, threshold=0.0, ignore_
                 })
     
     df = pd.DataFrame(results)
-    # 按照名称排序可能比较乱，但为了一致性，我们还是按 Source, Target 排序
     if not df.empty:
         df = df.sort_values(['source', 'target'], ascending=[True, True])
         df.to_csv(save_path, index=False, encoding='utf-8', header=False)
     else:
-        # 如果是空的，创建一个空文件
         Path(save_path).touch()
     
     print(f"格兰杰因果矩阵(带名称)已保存至: {save_path}")
     return True
 
 # 基于均值+标准差约束GC矩阵 (处理带名称的CSV)
-def constrain_with_hard_threshold(gc_csv_path, output_csv_path, series_names, threshold=0.004):
+def constrain_with_hard_threshold(gc_csv_path, output_csv_path, series_names, threshold=0.004, ignore_self_causality=False):
     series_num = len(series_names)
     # 1. 创建映射字典
     name_to_idx = {normalize_name(name): idx for idx, name in enumerate(series_names)}
@@ -330,20 +328,21 @@ def constrain_with_hard_threshold(gc_csv_path, output_csv_path, series_names, th
 
     constrained_results = []
     
-    # 4. 直接根据阈值进行过滤
+    # 4. 根据阈值进行过滤（支持自因果配置）
     for target_idx in range(series_num):
         for source_idx in range(series_num):
-            # 跳过自回归，且权重必须大于等于阈值
-            if source_idx != target_idx:
-                weight = GC_weights[target_idx, source_idx]
+            # 根据配置决定是否跳过自因果
+            if ignore_self_causality and source_idx == target_idx:
+                continue
                 
-                # === 核心修改逻辑在这里 ===
-                if weight >= threshold: 
-                    constrained_results.append({
-                        'source': series_names[source_idx],
-                        'target': series_names[target_idx],
-                        'strength': weight
-                    })
+            weight = GC_weights[target_idx, source_idx]
+            
+            if weight >= threshold: 
+                constrained_results.append({
+                    'source': series_names[source_idx],
+                    'target': series_names[target_idx],
+                    'strength': weight
+                })
 
     # 5. 保存结果
     if constrained_results:
@@ -355,7 +354,7 @@ def constrain_with_hard_threshold(gc_csv_path, output_csv_path, series_names, th
         print(f"无满足条件(>={threshold})的因果关系")
 
 # ================= 新增：计算 F1 和 AUROC 指标 =================
-def evaluate_gc_metrics(true_csv_path, pred_csv_path, constrained_csv_path, series_names):
+def evaluate_gc_metrics(true_csv_path, pred_csv_path, constrained_csv_path, series_names, ignore_self_causality=False):
     if not true_csv_path or not os.path.exists(true_csv_path):
         print("未提供真实因果关系文件或文件不存在，跳过 F1 和 AUROC 计算。")
         return None, None
@@ -388,13 +387,14 @@ def evaluate_gc_metrics(true_csv_path, pred_csv_path, constrained_csv_path, seri
     
     true_labels, pred_probs, pred_labels = [], [], []
     
-    # 展平矩阵，并剔除对角线（自回归因果）
+    # 展平矩阵（根据配置决定是否包含对角线）
     for i in range(series_num):
         for j in range(series_num):
-            if i != j:
-                true_labels.append(true_bin[i, j])
-                pred_probs.append(pred_weights[i, j])
-                pred_labels.append(constrained_bin[i, j])
+            if ignore_self_causality and i == j:
+                continue
+            true_labels.append(true_bin[i, j])
+            pred_probs.append(pred_weights[i, j])
+            pred_labels.append(constrained_bin[i, j])
                 
     try:
         f1 = f1_score(true_labels, pred_labels)
@@ -484,15 +484,18 @@ def main(model_path):
     causal_links_path = model_path / "causal_links.png"
     
     model = load_model(model_path, DEVICE)
-    res = save_gc_matrix_to_csv(model, gc_predict_path, SERIES_NAME, threshold=0.0, ignore_self_causality=True, is_softmax=False)
+    res = save_gc_matrix_to_csv(model, gc_predict_path, SERIES_NAME, threshold=0.0, 
+                                 ignore_self_causality=IGNORE_SELF_CAUSALITY, is_softmax=False)
     
     if res:
-        constrain_with_hard_threshold(gc_predict_path, gc_constrain_path, SERIES_NAME, threshold=0.004)
+        constrain_with_hard_threshold(gc_predict_path, gc_constrain_path, SERIES_NAME, threshold=0.004,
+                                       ignore_self_causality=IGNORE_SELF_CAUSALITY)
         plot_gc_triple_compare(gc_predict_path, gc_constrain_path, SERIES_NAME, GC_predict_img_path, true_csv_path=GC_PATH, show_weights=True)
         prediction_compare(model, X_DATA, Y_DATA, SERIES_NAME, save_path=model_path)
         save_causal_links(csv_path=gc_constrain_path, img_save_path=causal_links_path, series_names=SERIES_NAME)
         analyze_and_plot_lags(model, gc_constrain_path, SERIES_NAME, save_path=model_path)
-        f1, auroc = evaluate_gc_metrics(GC_PATH, gc_predict_path, gc_constrain_path, SERIES_NAME)
+        f1, auroc = evaluate_gc_metrics(GC_PATH, gc_predict_path, gc_constrain_path, SERIES_NAME,
+                                         ignore_self_causality=IGNORE_SELF_CAUSALITY)
     
     return f1, auroc # 确保 main 函数返回这两个指标
 if __name__ == "__main__":

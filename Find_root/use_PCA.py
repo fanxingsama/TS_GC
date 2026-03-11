@@ -84,13 +84,13 @@ def diagnose_from_csv(config):
         
         var_thresholds = getattr(model, 'var_SPE_thresholds', None) 
         
-        plt.figure(figsize=(12, 4))
+        plt.figure(figsize=(8, 4))
         plt.plot(series, label=f'变量异常分数', color='#1f77b4', linewidth=1.5, zorder=4)
         
         if var_thresholds is not None:
             var_thresh = var_thresholds[idx]
             plt.axhline(var_thresh, color='red', linestyle='--', linewidth=2, 
-                        label=f'Threshold ({var_thresh:.4f})', zorder=5)
+                        label=f'异常阈值 ({var_thresh:.4f})', zorder=5)
             
             is_anomaly = np.nan_to_num(series) > var_thresh
             diff = np.diff(is_anomaly.astype(int))
@@ -105,10 +105,10 @@ def diagnose_from_csv(config):
                 else:
                     plt.axvspan(start, end, color='lightskyblue', alpha=0.2)
         
-        plt.title(f'{name}')
-        plt.xlabel('时间步')
-        plt.ylabel('异常分数')
-        plt.tick_params(axis='both', which='both', length=0) # 去掉刻度线
+        plt.title(f'{name}', fontsize=16)
+        plt.xlabel('时间步', fontsize=16)
+        plt.ylabel('异常分数', fontsize=16)
+        plt.tick_params(axis='both', which='both', length=0, labelsize=14) # 去掉刻度线
         
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))

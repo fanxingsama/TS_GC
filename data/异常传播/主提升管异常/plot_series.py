@@ -7,8 +7,6 @@ from matplotlib import rcParams
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
 
-
-
 def visualize_sensors(file_path, save_dir, limit=1000):
     # 1. 检查文件是否存在
     if not os.path.exists(file_path):
@@ -43,16 +41,17 @@ def visualize_sensors(file_path, save_dir, limit=1000):
                 print(f"跳过空列: {col_name}")
                 continue
 
-            plt.figure(figsize=(10, 4)) # 设置图片大小 (宽, 高)
+            plt.figure(figsize=(8, 4)) # 设置图片大小 (宽, 高)
             
             # 绘制折线图
             plt.plot(df.index, df[col_name], linewidth=1.5)
             
-            plt.title(f"{col_name}", fontsize=12)
+            plt.title(f"{col_name}", fontsize=16)
             # plt.xlabel("pot")
-            plt.ylabel("Value")
+            plt.ylabel("Value", fontsize=16)
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
+            plt.tick_params(axis='both', which='both', length=0, labelsize=14)
 
             # 6. 处理文件名 (非常重要：把不能作为文件名的字符替换掉)
             # 例如：有的测点叫 "P-101/A"，斜杠会导致保存路径错误，替换为 "_"
@@ -73,8 +72,8 @@ def visualize_sensors(file_path, save_dir, limit=1000):
 
 if __name__ == "__main__":
     # === 配置区域 ===
-    csv_file_path = '增压机出口阀关闭_重复数据.csv'  # 在这里修改你的CSV文件路径
-    output_folder = '增压机出口阀关闭（重复数据）_图片保存'   # 图片保存的文件夹名称
+    csv_file_path = '提升管阀门开口全开.csv'  # 在这里修改你的CSV文件路径
+    output_folder = '提升管阀门开口全开_图片保存'   # 图片保存的文件夹名称
     points_to_plot = None            # 选择画多少个点
     # ================
     visualize_sensors(csv_file_path, output_folder, points_to_plot)
