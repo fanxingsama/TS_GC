@@ -299,7 +299,7 @@ def main(datafiles, evaluation):
                 # 保持原本的终端打印输出
                 print(columns[pair[1]], "causes", columns[pair[0]],"with a delay of",alldelays[pair],"time steps.")
                 # 将因果关系写入CSV文件：第一列是因 (columns[pair[1]])，第二列是果 (columns[pair[0]])
-                writer.writerow([columns[pair[1]], columns[pair[0]]])
+                writer.writerow([columns[pair[1]], columns[pair[0]], 1])
 
         print(f"因果关系已成功保存至: {csv_filename}")
 

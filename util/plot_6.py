@@ -93,8 +93,11 @@ def plot_multi_causal_matrix(true_csv_path, pred_csv_paths, pred_titles, ts_data
     ax_true = fig.add_subplot(gs[:, 0])
     ax_true.imshow(GC_true, cmap='Blues', aspect='equal')
     ax_true.set_title(true_title, fontsize=16, fontweight='bold', pad=8)
-    ax_true.set_xticks([])
-    ax_true.set_yticks([])
+    ax_true.set_xticks(np.arange(series_num))
+    ax_true.set_yticks(np.arange(series_num))
+    ax_true.set_xlabel("VAR数据集", fontsize=20, labelpad=10)
+    ax_true.set_xticklabels(series_names, rotation=0, ha='center', fontsize=10)
+    ax_true.set_yticklabels(series_names, fontsize=10)
     ax_true.tick_params(axis='both', which='both', length=0)
 
     # --- 右侧2×3：预测矩阵 ---
@@ -167,18 +170,18 @@ def plot_causal_matrix_with_auto_names(true_csv_path, pred_csv_path, ts_data_pat
 if __name__ == "__main__":
 
     # ============ 路径配置 ============
-    TRUE_CSV = "../data/virtual/causal_linear.csv" # 真实因果矩阵的路径
-    TS_DATA  = "../data/virtual/time_series_linear.csv" # 时间序列数据CSV路径（用于读取序列名称）
-    SAVE_PATH = "multi_model_compare.png" # 保存路径
+    TRUE_CSV = "../data/virtual/causal_nolinear.csv" # 真实因果矩阵的路径
+    TS_DATA  = "../data/virtual/time_series_nolinear.csv" # 时间序列数据CSV路径（用于读取序列名称）
+    SAVE_PATH = "multi_nolinear_compare.png" # 保存路径
 
     # 6个模型的预测结果CSV路径
     PRED_CSVS = [
-        'matrix/linear/TS-GC.csv',
-        'matrix/linear/CausalFormer.csv',
-        'matrix/linear/TCDF.csv',
-        'matrix/linear/cMLP.csv',
-        'matrix/linear/cLSTM.csv',
-        'matrix/linear/GVAR.csv',
+        'compare_model_matrix/nolinear/TS-GC.csv',
+        'compare_model_matrix/nolinear/CausalFormer.csv',
+        'compare_model_matrix/nolinear/TCDF.csv',
+        'compare_model_matrix/nolinear/cMLP.csv',
+        'compare_model_matrix/nolinear/cLSTM.csv',
+        'compare_model_matrix/nolinear/GVAR.csv',
     ]
 
     # 每个模型的标题
@@ -202,7 +205,7 @@ if __name__ == "__main__":
         pred_csv_paths=PRED_CSVS,
         pred_titles=PRED_TITLES,
         ts_data_path=TS_DATA,
-        true_title="Ground Truth",
+        true_title="真实因果矩阵",
         save_path=SAVE_PATH,
         show_weight_gradient=SHOW_WEIGHT_GRADIENT
     )

@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.metrics import f1_score, roc_auc_score
+from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_score
 
 def load_edges(file_path):
     """
@@ -95,6 +95,8 @@ def evaluate_causal_discovery(pred_file, true_file):
             
     # 4. 计算指标
     f1 = f1_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, zero_division=0)
+    recall    = recall_score(y_true, y_pred, zero_division=0)
     
     # 如果 y_true 只有 0 或只有 1，AUROC 将无法计算
     try:
@@ -110,15 +112,17 @@ def evaluate_causal_discovery(pred_file, true_file):
     print("=== 评估指标 ===")
     print(f"AUROC : {auroc:.4f}" if not np.isnan(auroc) else "AUROC : NaN")
     print(f"F1    : {f1:.4f}")
+    print(f"Precision : {precision:.4f}")
+    print(f"Recall    : {recall:.4f}")
     print(f"SHD   : {shd}")
     print("-" * 30)
 
 if __name__ == "__main__":
     
     # 请将以下路径替换为你自己的文件路径
-    TRUE_FILE = "../compare_model/fMRI/sim6_gt_processed.csv"
+    TRUE_FILE = "./compare_model_matrix/linear/causal_linear.csv"
     # PRED_FILE = "../compare_model/CausalFormer/csv/CausalFormer_timeseries6.csv" # CausalFormer预测矩阵
-    PRED_FILE = "../compare_model/TCDF/TCDF_timeseries6_causal.csv" # TCDF预测矩阵
+    PRED_FILE = "./compare_model_matrix/linear/GVAR.csv" # TCDF预测矩阵
     # PRED_CSV = "../saved/2026-03-02_02_15-19-34/GC_matrix_constrained.csv"  # TS-GC预测矩阵
     
     evaluate_causal_discovery(PRED_FILE, TRUE_FILE)

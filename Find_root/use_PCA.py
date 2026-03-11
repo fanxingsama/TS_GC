@@ -196,7 +196,7 @@ def plot_global_anomaly(stat_scores, threshold, output_img):
                label=f'异常阈值（{threshold:.2f}）')
     
     ax.set_xlabel('时间步', fontsize=12)
-    ax.set_ylabel('异常分数 (log)', fontsize=12)
+    ax.set_ylabel('异常分数', fontsize=12)
     ax.legend(loc='upper left', fontsize=10)
     ax.tick_params(axis='both', which='both', length=0)
     ax.grid(axis='y', linestyle=':', alpha=0.3)

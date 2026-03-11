@@ -76,7 +76,8 @@ print(f'  K={K}, hidden={HIDDEN_LAYER_SIZE}x{NUM_HIDDEN_LAYERS}, '
       f'epochs={NUM_EPOCHS}, lmbd={LMBD}, gamma={GAMMA}, lr={INITIAL_LR}')
 print('-' * 55)
 
-a_hat_binary, coeffs_full = training_procedure_trgc(
+# ✅ 用 * 接收所有返回值，避免 "too many values to unpack"
+results = training_procedure_trgc(
     data               = ts_data,
     order              = K,
     hidden_layer_size  = HIDDEN_LAYER_SIZE,
@@ -92,6 +93,18 @@ a_hat_binary, coeffs_full = training_procedure_trgc(
     verbose            = True,
     signed             = False
 )
+
+# ✅ 打印返回值结构，确认每个元素是什么
+print(f'\n返回值数量: {len(results)}')
+for idx, r in enumerate(results):
+    if hasattr(r, 'shape'):
+        print(f'  results[{idx}]: np.ndarray, shape={r.shape}, dtype={r.dtype}')
+    else:
+        print(f'  results[{idx}]: type={type(r)}, value={r}')
+
+# ✅ 第一个返回值通常是二值因果矩阵
+a_hat_binary = results[0]   # shape: (p, p)，二值因果矩阵
+coeffs_full  = results[1]   # shape: 系数矩阵
 
 # ================================================================
 # ============ 5. 评估 ============
