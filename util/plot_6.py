@@ -95,7 +95,7 @@ def plot_multi_causal_matrix(true_csv_path, pred_csv_paths, pred_titles, ts_data
     ax_true.set_title(true_title, fontsize=16, fontweight='bold', pad=8)
     ax_true.set_xticks(np.arange(series_num))
     ax_true.set_yticks(np.arange(series_num))
-    ax_true.set_xlabel("VAR数据集", fontsize=20, labelpad=10)
+    ax_true.set_xlabel("NVAR数据集", fontsize=20, labelpad=10)
     ax_true.set_xticklabels(series_names, rotation=0, ha='center', fontsize=10)
     ax_true.set_yticklabels(series_names, fontsize=10)
     ax_true.tick_params(axis='both', which='both', length=0)

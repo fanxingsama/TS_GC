@@ -184,7 +184,7 @@ def find_duplicate_sensor_columns(
 
 # 主执行逻辑
 if __name__ == "__main__":
-    INPUT_CSV_PATH = "提升管阀门开口全开.csv"
+    INPUT_CSV_PATH = "反再全测点正常数据.csv"
     FILE_ENCODING = "utf-8"
     
     # 使用新增的scaled_correlation模式

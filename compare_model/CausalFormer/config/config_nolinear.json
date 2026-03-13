@@ -15,7 +15,7 @@
   "data_loader": {
     "type": "TimeseriesDataLoader",
     "args": {
-      "data_dir": "../../util/matrix/linear/time_series_linear.csv",
+      "data_dir": "../../util/compare_model_matrix/nolinear/time_series_nolinear.csv",
       "batch_size": 128,
       "time_step": 32,
       "output_window": 31,

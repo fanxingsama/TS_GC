@@ -5,15 +5,15 @@ import os
 from pathlib import Path
 
 run_id = get_latest_run_id(base_path_str='Find_root/PCA_saved')
-# model_path = Path('saved') / run_id
+model_path = Path('saved') / run_id
 # DATA_PATH = os.path.join('Find_root', 'PCA_saved', run_id, 'potential_var.csv')
 # GC_PATH = None
 
 # DATA_PATH = os.path.join('data','virtual', 'time_series_linear.csv')
 # GC_PATH = os.path.join('data','virtual', 'causal_relations.csv')
 
-DATA_PATH = os.path.join('data','virtual', 'time_series_nonlinear.csv')
-GC_PATH = os.path.join('data','virtual', 'causal_nolinear.csv')
+DATA_PATH = os.path.join('data','casual', 'RRP_data.csv')
+GC_PATH = os.path.join('data','casual', 'RRP_causal_true.csv')
 
 INPUT_WINDOW = 5
 OUTPUT_WINDOW = 1

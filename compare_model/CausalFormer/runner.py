@@ -40,12 +40,23 @@ def construct_linear():
             'groundtruth': '../../util/matrix/linear/causal_linear.csv'
         }
     }
+    
+def construct_nolinear():
+    """nolinear 数据集任务"""
+    task_list = {
+        'nolinear': {
+            'dataset': '../../util/compare_model_matrix/nolinear/time_series_nolinear.csv',
+            'groundtruth': '../../util/compare_model_matrix/nolinear/causal_nolinear.csv'
+        }
+    }
+    return task_list
     return task_list
 
 tasks = {
     'demo':   construct_demo,
     'fMRI':   construct_fMRI,
     'linear': construct_linear,
+    'nolinear': construct_nolinear,
 }    
 
 def convert_gt_to_index(gt_path, columns):
@@ -235,9 +246,14 @@ def main(args):
 
     # ✅ 判断是否是 linear 任务
     is_linear = (dataset_name == 'time_series_linear')
+    is_nolinear = (dataset_name == 'time_series_nolinear')   # ← 新增
 
     if is_linear:
-        gt_path = '../../util/matrix/linear/causal_linear.csv'
+        gt_path = '../../util/compare_model_matrix/linear/causal_linear.csv'
+        if not os.path.exists(gt_path):
+            gt_path = None
+    elif is_nolinear:                                          # ← 新增分支
+        gt_path = '../../util/compare_model_matrix/nolinear/causal_nolinear.csv'
         if not os.path.exists(gt_path):
             gt_path = None
     else:
@@ -259,12 +275,12 @@ def main(args):
     runtask(label, args, data_dir, gt_path, dataset_name)
 
     # ✅ linear 任务：额外调用评估+可视化
-    if is_linear:
-        pred_csv = os.path.join(
-            os.getcwd(), 'csv', f'CausalFormer_{dataset_name}.csv'
-        )
+    if is_linear or is_nolinear:
+        gt_file  = '../../util/compare_model_matrix/linear/causal_linear.csv' if is_linear \
+                else '../../util/compare_model_matrix/nolinear/causal_nolinear.csv'
+        pred_csv = os.path.join(os.getcwd(), 'csv', f'CausalFormer_{dataset_name}.csv')
         series_names = ['x0','x1','x2','x3','x4','x5','x6','x7']
-        evaluate_linear(gt_path, pred_csv, series_names)
+        evaluate_linear(gt_file, pred_csv, series_names)
 
     # 读取日志摘要
     save_dir = Path(configJSON['trainer']['save_dir'])

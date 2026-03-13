@@ -88,7 +88,7 @@ def analyze_root_cause_and_save(model_folder_path):
     print(f"诊断结果：根原因变量为 {root}")
 
     # 6. 可视化设置
-    plt.figure(figsize=(14, 10))
+    plt.figure(figsize=(9, 7))
 
     # --- 布局选择 ---
     try:
@@ -115,24 +115,24 @@ def analyze_root_cause_and_save(model_folder_path):
         connectionstyle='arc3,rad=0.05'
     )
 
-    # 绘制节点标签
+    # # 绘制节点标签
     nx.draw_networkx_labels(mst, pos, font_size=11, font_weight='bold', font_color='#2C3E50')
 
-    # --- 绘制权重标签 ---
-    edge_labels = nx.get_edge_attributes(mst, 'weight')
-    # 格式化权重保留2位小数
-    edge_labels = {k: f"{v:.2f}" for k, v in edge_labels.items()}
+    # # --- 绘制权重标签 ---
+    # edge_labels = nx.get_edge_attributes(mst, 'weight')
+    # # 格式化权重保留2位小数
+    # edge_labels = {k: f"{v:.2f}" for k, v in edge_labels.items()}
     
-    nx.draw_networkx_edge_labels(
-        mst, 
-        pos, 
-        edge_labels=edge_labels, 
-        font_color='red',
-        font_size=9,
-        label_pos=0.5,
-        rotate=False,
-        bbox=dict(facecolor='white', edgecolor='none', alpha=0.8, pad=0.5)
-    )
+    # nx.draw_networkx_edge_labels(
+    #     mst, 
+    #     pos, 
+    #     edge_labels=edge_labels, 
+    #     font_color='red',
+    #     font_size=9,
+    #     label_pos=0.5,
+    #     rotate=False,
+    #     bbox=dict(facecolor='white', edgecolor='none', alpha=0.8, pad=0.5)
+    # )
 
     plt.title(f"根因诊断树 (Root: {root})", fontsize=15)
     plt.axis('off')

@@ -13,10 +13,10 @@ from training import training_procedure_trgc
 # ================================================================
 # ============ 1. 配置区（按需修改） ============
 # ================================================================
-TS_DATA_PATH  = '../../util/matrix/linear/time_series_linear.csv'
-GT_PATH       = '../../util/matrix/linear/causal_linear.csv'
-OUTPUT_CSV    = 'GVAR_result_linear.csv'
-OUTPUT_PNG    = 'GVAR_result_linear.png'
+TS_DATA_PATH  = 'time_series_nolinear.csv'
+GT_PATH       = 'causal_nolinear.csv'
+OUTPUT_CSV    = 'GVAR_result_nolinear.csv'
+OUTPUT_PNG    = 'GVAR_result_nolinear.png'
 
 # ---------- 模型超参数 ----------
 K                  = 3       # 滞后阶数，linear数据用3阶足够
