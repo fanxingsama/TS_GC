@@ -110,7 +110,7 @@ def evaluate_causal_discovery(pred_file, true_file):
     # 5. 输出结果
     print("-" * 30)
     print("=== 评估指标 ===")
-    print(f"AUROC : {auroc:.4f}" if not np.isnan(auroc) else "AUROC : NaN")
+    # print(f"AUROC : {auroc:.4f}" if not np.isnan(auroc) else "AUROC : NaN")
     print(f"F1    : {f1:.4f}")
     print(f"Precision : {precision:.4f}")
     print(f"Recall    : {recall:.4f}")
@@ -120,9 +120,9 @@ def evaluate_causal_discovery(pred_file, true_file):
 if __name__ == "__main__":
     
     # 请将以下路径替换为你自己的文件路径
-    TRUE_FILE = "./compare_model_matrix/linear/causal_linear.csv"
+    TRUE_FILE = "./compare_model_matrix/RRP/RRP_causal_true.csv"
     # PRED_FILE = "../compare_model/CausalFormer/csv/CausalFormer_timeseries6.csv" # CausalFormer预测矩阵
-    PRED_FILE = "./compare_model_matrix/linear/GVAR.csv" # TCDF预测矩阵
+    PRED_FILE = "./compare_model_matrix/RRP/GVAR.csv" # TCDF预测矩阵
     # PRED_CSV = "../saved/2026-03-02_02_15-19-34/GC_matrix_constrained.csv"  # TS-GC预测矩阵
     
     evaluate_causal_discovery(PRED_FILE, TRUE_FILE)

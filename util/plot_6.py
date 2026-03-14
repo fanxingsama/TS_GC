@@ -84,19 +84,19 @@ def plot_multi_causal_matrix(true_csv_path, pred_csv_paths, pred_titles, ts_data
 
     # -------------------------- 绘图 --------------------------
     # 左侧真实矩阵占1列，右侧3列给预测矩阵，用 width_ratios 控制比例
-    fig = plt.figure(figsize=(16, 7))
-    gs = GridSpec(2, 4, figure=fig, wspace=0.25, hspace=0.35,
+    fig = plt.figure(figsize=(15, 7))
+    gs = GridSpec(2, 4, figure=fig, wspace=0.4, hspace=0.6,
                   width_ratios=[1.5, 1, 1, 1],
                   height_ratios=[1, 1])
 
     # --- 左侧大图：真实因果矩阵（占左侧1列，跨2行） ---
     ax_true = fig.add_subplot(gs[:, 0])
     ax_true.imshow(GC_true, cmap='Blues', aspect='equal')
-    ax_true.set_title(true_title, fontsize=16, fontweight='bold', pad=8)
+    ax_true.set_title(true_title, fontsize=13, fontweight='bold', pad=8)
     ax_true.set_xticks(np.arange(series_num))
     ax_true.set_yticks(np.arange(series_num))
-    ax_true.set_xlabel("NVAR数据集", fontsize=20, labelpad=10)
-    ax_true.set_xticklabels(series_names, rotation=0, ha='center', fontsize=10)
+    ax_true.set_xlabel("RRP数据集", fontsize=13, labelpad=10)
+    ax_true.set_xticklabels(series_names, rotation=45, ha='right', fontsize=10)
     ax_true.set_yticklabels(series_names, fontsize=10)
     ax_true.tick_params(axis='both', which='both', length=0)
 
@@ -117,13 +117,11 @@ def plot_multi_causal_matrix(true_csv_path, pred_csv_paths, pred_titles, ts_data
 
         # 标题
         title = pred_titles[idx] if idx < len(pred_titles) else f"Model {idx+1}"
-        ax.set_title(title, fontsize=14, pad=6)
-        # ax.set_xticks([])
-        # ax.set_yticks([])
+        ax.set_title(title, fontsize=11, pad=6)
         ax.set_xticks(np.arange(series_num))
         ax.set_yticks(np.arange(series_num))
-        ax.set_xticklabels(series_names, rotation=0, ha='center', fontsize=10)
-        ax.set_yticklabels(series_names, fontsize=10)
+        ax.set_xticklabels(series_names, rotation=45, ha='right', fontsize=9)
+        ax.set_yticklabels(series_names, fontsize=9)
         ax.tick_params(axis='both', which='both', length=0)
 
         # 红色边框标注与真实矩阵不一致的位置
@@ -170,18 +168,20 @@ def plot_causal_matrix_with_auto_names(true_csv_path, pred_csv_path, ts_data_pat
 if __name__ == "__main__":
 
     # ============ 路径配置 ============
-    TRUE_CSV = "../data/virtual/causal_nolinear.csv" # 真实因果矩阵的路径
-    TS_DATA  = "../data/virtual/time_series_nolinear.csv" # 时间序列数据CSV路径（用于读取序列名称）
-    SAVE_PATH = "multi_nolinear_compare.png" # 保存路径
+    # TRUE_CSV = "../data/virtual/causal_linear.csv" # 真实因果矩阵的路径
+    # TS_DATA  = "../data/virtual/time_series_linear.csv" # 时间序列数据CSV路径（用于读取序列名称）
+    TRUE_CSV = "./compare_model_matrix/RRP/RRP_causal_true.csv" # 真实因果矩阵的路径
+    TS_DATA  = "../data/causal/RRP_data.csv" # 时间序列数据CSV路径（用于读取序列名称）
+    SAVE_PATH = "multi_RRP_compare.png" # 保存路径
 
     # 6个模型的预测结果CSV路径
     PRED_CSVS = [
-        'compare_model_matrix/nolinear/TS-GC.csv',
-        'compare_model_matrix/nolinear/CausalFormer.csv',
-        'compare_model_matrix/nolinear/TCDF.csv',
-        'compare_model_matrix/nolinear/cMLP.csv',
-        'compare_model_matrix/nolinear/cLSTM.csv',
-        'compare_model_matrix/nolinear/GVAR.csv',
+        'compare_model_matrix/RRP/TS-GC.csv',
+        'compare_model_matrix/RRP/CausalFormer.csv',
+        'compare_model_matrix/RRP/TCDF.csv',
+        'compare_model_matrix/RRP/cMLP.csv',
+        'compare_model_matrix/RRP/cLSTM.csv',
+        'compare_model_matrix/RRP/GVAR.csv',
     ]
 
     # 每个模型的标题
