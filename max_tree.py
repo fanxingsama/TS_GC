@@ -36,7 +36,7 @@ def hierarchy_pos(G, root=None, width=1., vert_gap=0.2, vert_loc=0, xcenter=0.5)
 def analyze_root_cause_and_save(model_folder_path):
     # 1. 构建路径
     input_csv_path = model_folder_path / "GC_matrix.csv"
-    output_img_path = model_folder_path / "root_cause_max_tree.png"
+    output_img_path = model_folder_path / "root_cause_max_tree.pdf"
 
     print(f"正在处理文件: {input_csv_path}")
 
@@ -134,7 +134,7 @@ def analyze_root_cause_and_save(model_folder_path):
     #     bbox=dict(facecolor='white', edgecolor='none', alpha=0.8, pad=0.5)
     # )
 
-    plt.title(f"根因诊断树 (Root: {root})", fontsize=15)
+    # plt.title(f"根因诊断树 (Root: {root})", fontsize=15)
     plt.axis('off')
     
     # 7. 保存图片而不是显示
@@ -145,9 +145,7 @@ def analyze_root_cause_and_save(model_folder_path):
     print(f"成功: 最大生成树图片已保存至 {output_img_path}")
 
 def main():
-    # 1. 获取 ID (逻辑同 test_TS_GC.py)
-    # 你可以手动指定，也可以自动获取最新
-    # run_id = 'T2_high' 
+    # run_id = '2026-03-13_10-02-17_root' 
     run_id = get_latest_run_id()
     
     if not run_id:

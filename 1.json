@@ -1,0 +1,34 @@
+{
+  "root": "x2",
+  "variables": {
+    "x1":  {"tag": "PDRSA1104.PV",    "description": "主提升与副提升管压差"},
+    "x2":  {"tag": "TIC1155.MV",      "description": "主提升管水平段温度记录控制"},
+    "x3":  {"tag": "FRCA1111.PV",     "description": "外取热流化风调节阀开度"},
+    "x4":  {"tag": "LRCA1101.PV",     "description": "主提升管沉降器总料位"},
+    "x5":  {"tag": "PRA1102.PV",      "description": "主提升管顶部压力"},
+    "x6":  {"tag": "WR1104.PV",       "description": "再生器总藏量"},
+    "x7":  {"tag": "DR1107.PV",       "description": "主提升管密相上部密度指示"},
+    "x8":  {"tag": "PDR1103.PV",      "description": "主提升管单级旋风压差"},
+    "x9":  {"tag": "TIC1155.PV",      "description": "主提升管水平段温度记录"},
+    "x10": {"tag": "CCSFIC1401.PV",   "description": "主风机风量记录"}
+  },
+  "anomaly_edges": [
+    {"source": "x2",  "target": "x1"},
+    {"source": "x2",  "target": "x9"},
+    {"source": "x1",  "target": "x4"},
+    {"source": "x1",  "target": "x5"},
+    {"source": "x1",  "target": "x7"},
+    {"source": "x4",  "target": "x6"},
+    {"source": "x5",  "target": "x8"},
+    {"source": "x9",  "target": "x3"},
+    {"source": "x6",  "target": "x10"}
+  ],
+  "causal_edges": [
+    {"source": "x10", "target": "x6"},
+    {"source": "x3",  "target": "x9"},
+    {"source": "x7",  "target": "x8"},
+    {"source": "x6",  "target": "x1"},
+    {"source": "x4",  "target": "x7"},
+    {"source": "x5",  "target": "x4"}
+  ]
+}

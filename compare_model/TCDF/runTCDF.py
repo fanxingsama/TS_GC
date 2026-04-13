@@ -390,3 +390,4 @@ else:
 
 # python runTCDF.py --ground_truth ../fMRI/timeseries6.csv=../fMRI/sim6_gt_processed.csv  --epochs 500 --log_interval 250 --plot
 # python runTCDF.py --ground_truth time_series_nolinear.csv=causal_nolinear.csv  --epochs 500 --log_interval 250 --plot
+# python runTCDF.py --ground_truth ./SNR/time_series_nolinear_snr20.csv=./SNR/causal_nolinear.csv  --epochs 500 --log_interval 250 --plot

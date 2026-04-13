@@ -4,7 +4,7 @@ class Config:
     # ==========================================
     # 1. 路径与目录配置 (Paths Configuration)
     # ==========================================
-    DATA_BASE_DIR = os.path.join('..', 'data', '异常传播', '主提升管异常')
+    DATA_BASE_DIR = os.path.join('..', 'data', '异常传播')
     TRAIN_DATA_PATH = os.path.join(DATA_BASE_DIR, '反再全测点正常数据.csv')
     TEST_DATA_PATH = os.path.join(DATA_BASE_DIR, '提升管阀门开口全开.csv')
     

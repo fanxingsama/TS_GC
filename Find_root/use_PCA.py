@@ -8,8 +8,22 @@ from RSPCA import RobustScaler, RNSPCA
 from pca_config import Config
 from matplotlib import rcParams
 
+# 字体与显示配置
 rcParams['font.family'] = 'SimHei'
 rcParams['axes.unicode_minus'] = False
+
+# 全局字体大小配置（可自由调节）
+rcParams['axes.titlesize'] = 24       # 图表标题字体大小
+rcParams['axes.labelsize'] = 24       # 坐标轴标签字体大小（如"异常贡献度"）
+rcParams['xtick.labelsize'] = 24      # X轴刻度标签字体大小（柱状图底部的变量名）
+rcParams['ytick.labelsize'] = 24      # Y轴刻度标签字体大小
+rcParams['legend.fontsize'] = 24      # 图例字体大小
+
+# 系统总体异常分数图专用配置（可单独调节）
+GLOBAL_ANOMALY_XLABEL_SIZE = 28       # "时间步"标签字体大小
+GLOBAL_ANOMALY_YLABEL_SIZE = 28       # "异常分数"标签字体大小
+GLOBAL_ANOMALY_LEGEND_SIZE = 22       # 图例字体大小
+GLOBAL_ANOMALY_TICK_SIZE = 28         # 刻度数字字体大小
 
 
 def diagnose_from_csv(config):
@@ -26,8 +40,8 @@ def diagnose_from_csv(config):
         os.makedirs(save_dir)
         print(f">>> 已创建结果保存文件夹: {save_dir}")
         
-    output_img_path = os.path.join(save_dir, 'diagnostic_report.png')
-    output_line_path = os.path.join(save_dir, 'global_anomaly_trend.png')
+    output_img_path = os.path.join(save_dir, 'diagnostic_report.pdf')
+    output_line_path = os.path.join(save_dir, 'global_anomaly_trend.pdf')
     output_csv_path = os.path.join(save_dir, 'potential_var.csv')
     output_log_path = os.path.join(save_dir, 'diagnosis_log.txt')
 
@@ -105,10 +119,10 @@ def diagnose_from_csv(config):
                 else:
                     plt.axvspan(start, end, color='lightskyblue', alpha=0.2)
         
-        plt.title(f'{name}', fontsize=16)
-        plt.xlabel('时间步', fontsize=16)
-        plt.ylabel('异常分数', fontsize=16)
-        plt.tick_params(axis='both', which='both', length=0, labelsize=14) # 去掉刻度线
+        plt.title(f'{name}')
+        plt.xlabel('时间步')
+        plt.ylabel('异常分数')
+        plt.tick_params(axis='both', which='both', length=0) # 去掉刻度线
         
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
@@ -117,7 +131,7 @@ def diagnose_from_csv(config):
         plt.grid(True, linestyle=':', alpha=0.4)
         plt.tight_layout()
         
-        save_path = os.path.join(var_trend_dir, f'rank_{rank+1}_{name.replace("/", "_")}.png')
+        save_path = os.path.join(var_trend_dir, f'rank_{rank+1}_{name.replace("/", "_")}.pdf')
         plt.savefig(save_path, dpi=150)
         plt.close()
         
@@ -195,10 +209,10 @@ def plot_global_anomaly(stat_scores, threshold, output_img):
     ax.axhline(y=threshold, color='red', linestyle='--', linewidth=1.5, 
                label=f'异常阈值（{threshold:.2f}）')
     
-    ax.set_xlabel('时间步', fontsize=12)
-    ax.set_ylabel('异常分数', fontsize=12)
-    ax.legend(loc='upper left', fontsize=10)
-    ax.tick_params(axis='both', which='both', length=0)
+    ax.set_xlabel('时间步', fontsize=GLOBAL_ANOMALY_XLABEL_SIZE)
+    ax.set_ylabel('异常分数', fontsize=GLOBAL_ANOMALY_YLABEL_SIZE)
+    ax.legend(loc='upper left', fontsize=GLOBAL_ANOMALY_LEGEND_SIZE)
+    ax.tick_params(axis='both', which='both', length=0, labelsize=GLOBAL_ANOMALY_TICK_SIZE)
     ax.grid(axis='y', linestyle=':', alpha=0.3)
     
     plt.tight_layout()
@@ -209,17 +223,17 @@ def plot_global_anomaly(stat_scores, threshold, output_img):
 
 def plot_results(dcc_scores, highlight_indices, feature_names, output_img, top_k):
     n_vars = len(dcc_scores)
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(20, 10))  # 增加宽度以拉大变量名间隔
     x_idx = np.arange(n_vars)
     colors = ['crimson' if i in highlight_indices else 'lightgray' for i in range(n_vars)]
     plt.bar(x_idx, dcc_scores, color=colors, alpha=0.9)
     
     tick_labels = [feature_names[i] if i in highlight_indices else '' for i in range(n_vars)]
-    plt.xticks(x_idx, tick_labels, rotation=45, ha='right', fontsize=9)
+    plt.xticks(x_idx, tick_labels, rotation=60, ha='right')  # 增加旋转角度以避免重叠
     
     plt.tick_params(axis='both', which='both', length=0) # 去掉刻度线
 
-    plt.ylabel('异常贡献度', fontsize=12)
+    plt.ylabel('异常贡献度')
     plt.grid(axis='y', linestyle=':', alpha=0.3)
     plt.tight_layout()
     plt.savefig(output_img, dpi=300)
